@@ -60,6 +60,26 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 - Flush por partida (não batch 80) — alinha unidade de persistência com unidade lógica.
 - Filtro `?game_ids=...` em `/api/analyses` — payload proporcional à sessão atual.
 
+### Skill `report-coach` (3ª perspectiva, B2B)
+
+- **Voz "treinador → aluno"**: diagnóstico do aluno + delta vs ciclo anterior + comparativo cross-aluno + plano didático prescritivo (livro/capítulo + cronograma + métrica para próxima aula).
+- Template em verde-azulado (`--accent: #1d6e8e`), 12 seções; benchmark cross-aluno renderizado em tabela com aluno destacado.
+- `compute_coach_benchmarks` em `build.py` calcula percentil do aluno em Score, win-rate, confiança e profundidade ECO sobre todos os players da DB. Disponível só para `perspective=coach`.
+- Slash command `/report-coach <username>`. Skill seguida do mesmo padrão de `myself`/`enemy` (compute → cache lookup → redação → build).
+
+### Cache de sections (regen rápida + economia de tokens)
+
+- Tabela `sections_cache (username, perspective, stamp, sections_json, signature_json)` no SQLite.
+- `compute_sample_signature` extrai assinatura compacta da amostra (n_games, score_10, fases, top openings, tactical, paradigmáticas, time_median).
+- `signature_delta_flags` compara assinatura cacheada vs atual e devolve flag por seção (`reuse` | `regenerate`) com heurísticas: n_games delta >20% regenera tudo; score delta >0.5 regenera 1/2/6/9/11; fase delta >0.3 regenera 2/6; top_openings/tactical_top1/paradigmaticas mudaram regeneram a respectiva seção.
+- CLI `cache_lookup.py <user> <perspective>` retorna `{cached, sections, delta_flags, reuse_recommendation}`. Skills `report-myself`/`report-enemy`/`report-coach` consultam antes de redigir; em `partial_regen` regeneram só seções com flag, copiam o resto. Economia ~10× em tokens quando muda pouco.
+
+### Telemetria de execução (recalibração da estimativa)
+
+- Tabela `execution_logs (id, username, started_at, ended_at, duration_seconds, depth, engine, n_games, n_positions_total, n_positions_analyzed, n_db_hits, n_cache_hits, n_cache_misses, n_failures, expected_seconds_at_start, status)`.
+- `index.html` chama `POST /api/execution-logs/start` ao iniciar análise e `/end` no `finally`. Estimativa fica em `expected_seconds_at_start`; tempo real entra em `duration_seconds`.
+- `GET /api/execution-logs/calibration?engine=...` retorna mediana de `sec/posição` por `(engine, depth)` (mínimo 3 amostras). Browser carrega no boot e em `estimateSecondsPerPosition` usa o valor observado quando disponível, fallback no modelo empírico antigo. Recalibra automaticamente sem ajuste manual.
+
 ### Lifecycle e output (commits `397956f`/`13ce2e1`)
 
 - **Skills `/app-start` e `/app-stop`** + scripts `start.sh`/`stop.sh`. PIDs registrados em `.app-state.json`, idempotente, com fallback `pgrep` defensivo.
@@ -90,16 +110,6 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 **Custo:** 1 dia.
 **Pré-requisito:** definir voz/tom canônica em forma de exemplos (few-shot).
 
-### 3. Skill `report-coach` (terceira perspectiva)
-**Por quê:** B2B (treinador acompanha aluno) é mercado distinto. Coach quer comparar evolução do aluno + comparativo com benchmarks da turma.
-**Como:** Reusa `compute.py` + `build.py`; novo template em verde-azulado, foco em delta vs ciclo anterior, comparativos com outros alunos do mesmo treinador.
-**Custo:** 1 dia.
-
-### 4. Tabela de telemetria de execução (recalibração da estimativa)
-**Por quê:** estimativa de tempo no `index.html` está descalibrada — execuções recentes demoraram bem mais que o estimado.
-**Como:** Tabela `execution_logs` no SQLite com `timestamp_start/end`, `duration_seconds`, `depth`, `engine`, `n_failures`, `cache_hit_rate`, `db_hit_rate`, `expected_seconds_at_start`. Após acúmulo de execuções, regressão simples (`actual / expected` médio por engine + depth + n_positions) recalibra `estimateSecondsPerPosition`.
-**Custo:** 4h.
-
 ### 5. Comparativo cross-jogador
 **Por quê:** o SQLite `players` table existe mas não é usado. Querível: "como o `jhoumedeiros` se compara aos outros usuários da minha base?".
 **Como:** Nova seção opcional no relatório (myself only): tabela com percentil de score / win-rate / depth de teoria entre os players da DB.
@@ -124,12 +134,6 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 **Por quê:** se o browser cachear sozinho, dispensa o servidor local pra usuários casuais.
 **Como:** Service worker que mantém `position_cache` em IndexedDB; sync periódico com SQLite via download/upload manual.
 **Custo:** 1 dia. Trade-off: hoje o `serve.py` é stdlib e simples; PWA adiciona complexidade.
-
-### 10. Cache de relatório por jogador (regen rápida + economia de tokens)
-**Por quê:** quando alguém pede `/report-myself <user>` várias vezes (ou alterna myself ↔ enemy), hoje a skill Claude reescreve TODAS as 11 seções do zero, gastando tokens. Mas `analyses.computed_json` no SQLite já preserva o JSON computado (compute.py é barato — ~5s). O caro é a redação.
-**Como:** ao gerar o relatório, salvar `data/db/sections_cache` (nova tabela) com `(username, perspective, stamp, sections_json, sample_signature)`. Em pedido subsequente do mesmo `(username, perspective)`, comparar `sample_signature` (hash de n_games + score_10 + top-3 metricas mudou?). Se mudança <5%, reusa sections cacheadas e só regenera deltas. Se mudou substancialmente, redige tudo. Skill recebe instrução: "se sections cacheadas estão presentes e válidas, atualize só os trechos com delta significativo".
-**Impacto:** segundo relatório do mesmo user em ~30s e ~10× menos tokens.
-**Custo:** 4–6h. Pré-requisito: definir o que é "delta significativo" por seção (heurística simples: n_games delta >20% OU score delta >0.5 → re-redige seção).
 
 ---
 

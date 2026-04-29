@@ -54,10 +54,11 @@ Coleta (browser, API chess.com)
   → PDF em data-reports/<user>_<perspective>_<stamp>.pdf
 ```
 
-Duas perspectivas de relatório:
+Três perspectivas de relatório:
 
 - **`/report-myself <user>`** — "este jogador sou eu" (diagnóstico + plano de estudo)
 - **`/report-enemy <user>`** — "este é meu adversário" (plano de combate)
+- **`/report-coach <user>`** — "este aluno é meu" (delta vs ciclo anterior + benchmark cross-aluno + plano didático)
 
 Estado completo do produto e roadmap: ver `README.md` e `ROADMAP.md`.
 
@@ -192,6 +193,9 @@ Quando produto mudar, **atualizar essas docs no mesmo commit** que a mudança de
 | Auto mode é o modo padrão de operação                                         | 2026-04-29 | Felipe confirma direto, não pede planos para tasks pequenas |
 | Análise de tempo via `[%clk]` do PGN — não muda Score, vira Seção 9 do PDF    | 2026-04-29 | `clock.py` + backfill em `history.py` + `compute_time_analysis` |
 | Skill `assess-data` para resumo da base                                       | 2026-04-29 | Inspeciona history.db, lista users + cobertura das 4 camadas    |
+| Skill `report-coach` (3ª perspectiva, B2B)                                    | 2026-04-29 | Voz treinador→aluno; benchmark cross-aluno via `compute_coach_benchmarks` |
+| Cache de sections com signature delta                                         | 2026-04-29 | Tabela `sections_cache`; skill consulta via `cache_lookup.py` antes de redigir |
+| Telemetria de execução com auto-recalibração                                  | 2026-04-29 | Tabela `execution_logs`; `estimateSecondsPerPosition` usa mediana observada por (engine, depth) |
 
 ### Em aberto (decidir num próximo ciclo)
 
@@ -223,6 +227,12 @@ python3.12 .claude/skills/_chess_shared/build.py <user> enemy
 /assess-data                       # Resumo da base (jogadores, camadas analíticas, depth)
 /report-myself <user>              # PDF diagnóstico próprio
 /report-enemy <user>               # PDF dossiê de combate
+/report-coach <user>               # PDF didático (treinador→aluno: delta + benchmark + plano)
+```
+
+```bash
+# Cache de sections (regen rápida + economia de tokens)
+/opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/cache_lookup.py <user> <myself|enemy|coach>
 ```
 
 ---
@@ -277,4 +287,4 @@ Quando algo não está claro ou destoa de uma decisão prévia, eu pergunto ante
 - Quando um padrão técnico da seção 3 mudar.
 - Quando emergir uma lição da seção 7 que valha registrar.
 
-Última atualização: 2026-04-29 — pós verbosidade do log + WAL + doc fingerprints táticos.
+Última atualização: 2026-04-29 — pós report-coach + cache de sections + telemetria de execução.

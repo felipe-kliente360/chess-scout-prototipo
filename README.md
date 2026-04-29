@@ -1,9 +1,10 @@
 # chess-scout-prototipo
 
-Gerador de relatórios analíticos de xadrez (PDF, PT-BR) para jogadores de Chess.com. Coleta partidas, analisa cada lance com **Stockfish + tema tático + fatos estruturais** (3 camadas determinísticas e complementares), persiste tudo em SQLite local e produz dois tipos de dossiê:
+Gerador de relatórios analíticos de xadrez (PDF, PT-BR) para jogadores de Chess.com. Coleta partidas, analisa cada lance com **Stockfish + tema tático + fatos estruturais** (3 camadas determinísticas e complementares), persiste tudo em SQLite local e produz três tipos de dossiê:
 
 - **`/report-myself <user>`** — perspectiva "este jogador sou eu". Diagnóstico próprio + plano de estudo de 30 dias.
 - **`/report-enemy <user>`** — perspectiva "este é meu adversário". Plano de combate concreto.
+- **`/report-coach <user>`** — perspectiva "este aluno é meu" (B2B treinador/escola). Delta vs ciclo anterior + comparativo cross-aluno + plano didático com livros e cronograma.
 
 ---
 
@@ -220,17 +221,23 @@ chess-scout-prototipo/
     │   ├── app-start.md
     │   ├── app-stop.md
     │   ├── report-myself.md
-    │   └── report-enemy.md
+    │   ├── report-enemy.md
+    │   └── report-coach.md
     └── skills/
         ├── _chess_shared/
         │   ├── compute.py                # Pipeline analítico
         │   ├── build.py                  # Renderização PDF
         │   ├── history.py                # SQLite schema + helpers
+        │   ├── cache_lookup.py           # Cache de sections (regen rápida)
+        │   ├── clock.py                  # Extração [%clk] do PGN
         │   ├── position_facts.py         # 24 detectores estruturais
         │   ├── theory.md                 # Referência conceitual + tom
         │   ├── base.css
         │   └── macros.html
         ├── report-myself/
+        │   ├── SKILL.md
+        │   └── template.html
+        ├── report-coach/
         │   ├── SKILL.md
         │   └── template.html
         └── report-enemy/
@@ -366,6 +373,7 @@ PDFs ficam em `data-reports/<user>_<perspective>_<stamp>.pdf`.
 | `/app-stop` | Derruba todos os processos registrados |
 | `/report-myself <user>` | PDF de diagnóstico próprio + plano de estudo (11 seções) |
 | `/report-enemy <user>` | PDF de dossiê de combate (10 seções) |
+| `/report-coach <user>` | PDF didático treinador→aluno: delta + benchmark cross-aluno + plano de 4 semanas (12 seções) |
 
 ---
 
