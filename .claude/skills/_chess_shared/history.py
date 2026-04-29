@@ -158,11 +158,15 @@ def cache_stats(conn: sqlite3.Connection) -> dict:
 
 def open_db(db_path: str | Path) -> sqlite3.Connection:
     """Abre conexão e garante schema (idempotente). Aplica migrations leves
-    (ALTER TABLE ADD COLUMN) para DBs criados antes de novas colunas existirem."""
+    (ALTER TABLE ADD COLUMN) para DBs criados antes de novas colunas existirem.
+    Modo WAL (Write-Ahead Logging): leitores e escritor coexistem sem bloquear,
+    necessário quando o browser está persistindo análises e compute.py roda em
+    paralelo. Cria arquivos -wal e -shm ao lado do .db."""
     p = Path(db_path)
     p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(p))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
     conn.executescript(SCHEMA)
     # Migrations idempotentes — ADD COLUMN só se ainda não existe.
     existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(game_analyses)")}

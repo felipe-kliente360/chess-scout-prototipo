@@ -155,10 +155,4 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 
 ## 📌 Backlog anotado em 2026-04-29
 
-Pendências menores remanescentes (limpeza CSV, dead code e revisão da geração de arquivos foram executados em `13ce2e1`).
-
-### Outros itens menores
-
-- Reduzir verbosidade do log do servidor: hoje cada GET /api/* aparece em stderr, polui terminal em sessões longas.
-- Adicionar PRAGMA `journal_mode=WAL` em `open_db` para tolerar concorrência futura (compute.py + browser ao mesmo tempo).
-- Documentar formato dos fingerprints B/C tático em `theory.md` (hoje só em `build_tactical_index.py` docstring).
+Todos os pendentes deste backlog foram executados. Limpeza CSV, dead code e revisão da geração de arquivos em `13ce2e1`. Verbosidade do log, PRAGMA WAL e documentação dos fingerprints táticos em ciclo seguinte.

@@ -524,3 +524,101 @@ Trechos curtos para calibrar tom. **Use o estilo do "BOM" abaixo. Evite ostensiv
 > "Conforme atestam diversos teóricos consagrados da pedagogia enxadrística, este tipo de equívoco encontra-se intimamente relacionado a uma série de fenômenos cognitivos amplamente estudados na literatura especializada..."
 
 **Princípio**: cita autor/obra quando ANCORA a recomendação prática (Kuljasevic = método de cálculo, Soltis = estrutura, Dvoretsky = final, Capablanca = técnica). Não cita só para parecer culto.
+
+---
+
+## 22. Anatomia dos fingerprints táticos (`tactical_theme`)
+
+Referência técnica de como `tactical_theme` é gerado. Útil para debug, novos detectores, ou rebuild do índice. **Implementação**: `scripts/build_tactical_index.py` (build offline) + `tactical-themes.js` (lookup runtime). Paridade JS↔Python validada com puzzles canônicos.
+
+### Estrutura do hash B (padrão posicional)
+
+Captura a posição **antes do best_move**, do ponto de vista do solver (`stm` = side to move). 5 campos separados por `|`:
+
+```
+{stm}|sk_{kingsafety_solver}|ek_{kingsafety_enemy}|{atks}|U:{undef}|of_{open_files}
+```
+
+| Campo | Formato | Significado |
+|---|---|---|
+| `stm` | `w` ou `b` | Lado a jogar (perspectiva do solver) |
+| `sk_X_N` | `ks`/`qs`/`mid`/`unsafe` + nº atacantes próximos | Segurança do rei do solver: side do roque + atacantes inimigos numa janela 3×3 |
+| `ek_X_N` | idem | Segurança do rei adversário (mesma fórmula) |
+| `atks` | lista `A>T_dN;...` ordenada por valor do alvo, top 4 | Ataques do solver a peças R/D/T/B/N inimigas. `A` = símbolo do atacante (P/N/B/R/Q/K), `T` = símbolo do alvo, `dN` = nº defensores do alvo |
+| `U:{symbols}` | lista de peças R/D/T/B/N inimigas sem defensor próprio, top 4 | Quem está pendurado no lado adversário |
+| `of_N` | inteiro 0-5 | Colunas abertas/semi-abertas a ≤2 da coluna do rei adversário |
+
+**Exemplo**: `b|sk_ks_0|ek_ks_2|N>Q_d0;N>K_d0|U:Q|of_2` = pretas a jogar, ambos rocados curto, 2 atacantes brancos perto do rei branco, cavalo preto ataca dama e rei brancos sem defensor, dama branca pendurada, 2 colunas abertas perto do rei branco. Padrão clássico de garfo do cavalo.
+
+### Estrutura do hash C (delta após best_move)
+
+Captura **o que muda** entre antes e depois do best_move. Mais discriminante que B porque foca no lance crítico, não na posição estática.
+
+```
+g:{gained_attacks}|nT:{n_targets}|cap:{captured}|chk:{0/1}|mate:{0/1}|tU:{0/1}
+```
+
+| Campo | Significado |
+|---|---|
+| `g:` | Lista compacta `A>T,...` de ataques que **surgiram** após o lance (não existiam antes), top 5, dedupe por par atacante-alvo |
+| `nT:N` | Nº de tipos de peça-alvo distintos no `gained` (1 = ataque único; ≥2 = duplo ataque clássico) |
+| `cap:X` | Símbolo da peça capturada pelo lance (`""` se não captura) |
+| `chk:0/1` | O lance dá xeque? |
+| `mate:0/1` | O lance dá mate? |
+| `tU:0/1` | Algum dos alvos do `gained` está sem defensor após o lance? |
+
+**Exemplos canônicos** (validados no índice atual):
+- `g:N>K,N>Q\|nT:2\|cap:\|chk:1\|mate:0\|tU:1` → fork (cavalo ataca rei e dama, sem captura, com xeque, dama sem defensor) — aparece em 2.239 puzzles, top-1 tema = fork (63%)
+- `g:Q>K,Q>R\|nT:2\|cap:\|chk:1\|mate:0\|tU:1` → fork de dama atacando rei e torre — 4.912 puzzles, top-1 fork (50%)
+- `g:Q>K\|nT:1\|cap:\|chk:1\|mate:0\|tU:0` → mate forçado / ataque ao rei — 15.008 puzzles, top-1 mate
+- `g:R>K\|nT:1\|cap:\|chk:1\|mate:0\|tU:1` → mate da fila do fundo / sacrifício — 14.936 puzzles, top-1 mate
+- `g:\|nT:0\|cap:\|chk:0\|mate:0\|tU:0` → lance quieto sem ataque a peça de valor (filtrado pelo stoplist hoje)
+
+### Stoplist de tags Lichess descartadas
+
+Tags que aparecem nos puzzles mas não dizem o **motivo tático** — só caracterizam o puzzle (fase, tamanho, magnitude da vantagem, nível do jogador). Filtradas no build:
+
+| Categoria | Tags |
+|---|---|
+| Fase do puzzle | `middlegame`, `endgame`, `opening` |
+| Tamanho | `short`, `long`, `veryLong`, `oneMove` |
+| Magnitude | `advantage`, `crushing`, `equality` |
+| Nível | `master`, `masterVsMaster`, `superGM` |
+| Final específico | `rookEndgame`, `pawnEndgame`, `queenEndgame`, `knightEndgame`, `bishopEndgame`, `queenRookEndgame` |
+| Mate em N | `mateIn1` … `mateIn5` |
+| Descritivos não-diagnósticos | `quietMove`, `advancedPawn`, `defensiveMove` |
+
+Permanecem (tags úteis): `fork`, `pin`, `skewer`, `discoveredAttack`, `mate`, `backRankMate`, `attraction`, `deflection`, `trappedPiece`, `sacrifice`, `zwischenzug`, `kingsideAttack`, `queensideAttack`, `discoveredCheck`, `doubleCheck`, `interference`, `xRayAttack`, `zugzwang`, `clearance`, `attackingF2F7`, `hangingPiece`, `promotion`, etc.
+
+### Critérios de filtragem
+
+- Puzzle entra no índice se `themes` (após stoplist) tem ≥1 tag útil.
+- Fingerprint entra no JSON final se `n ≥ min_count` (default 3) — descarta hashes raros que seriam ruído.
+- Por fingerprint: top-3 temas mais frequentes, com contagem.
+- No browser: `classifyPosition` retorna `theme` se `confidence = c[0]/n ≥ 0.30` E `n ≥ 5` (C) ou `n ≥ 3` (B).
+
+### Convenção de captura de posição
+
+Lichess puzzle DB: lance 0 da `solution` é o lance do oponente que cria a posição-tarefa; lance 1 é o `best_move` do solver. Por isso o build aplica `solution[0]` na FEN inicial antes de extrair B/C — o fingerprint reflete a posição do solver.
+
+### Como debuggar
+
+Para testar manualmente uma posição:
+```python
+from scripts.build_tactical_index import fingerprint_b, fingerprint_c
+import chess
+b = chess.Board("r3k2r/pp1n1ppp/4pn2/q1bp4/2B5/2P1PN2/PP3PPP/RNBQ1RK1 w kq - 0 8")
+best = chess.Move.from_uci("c4f7")
+print(fingerprint_b(b))
+print(fingerprint_c(b, best))
+# B: w|sk_ks_0|ek_ks_0|B>K_d0|U:|of_0
+# C: g:B>K|nT:1|cap:|chk:1|mate:0|tU:0
+```
+
+E lookup no JSON final:
+```python
+import json
+idx = json.load(open("data/tactical/themes_index.json"))
+print(idx["C"]["g:B>K|nT:1|cap:|chk:1|mate:0|tU:0"])
+# {'t': ['mate', 'attraction', 'sacrifice'], 'c': [...], 'n': ...}
+```

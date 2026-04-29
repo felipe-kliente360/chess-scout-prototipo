@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sqlite3
 import sys
 import urllib.parse as urlparse
@@ -68,7 +70,26 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "ChessScoutLocal/1.0"
 
     def log_message(self, fmt, *args):
-        sys.stderr.write(f"[serve] {self.address_string()} - {fmt % args}\n")
+        # Níveis de verbosidade (env CHESS_SCOUT_VERBOSE):
+        #   "0" (default) = só erros (4xx/5xx) e modificações (POST/PUT/DELETE)
+        #   "1"           = + GETs também
+        #   "2"           = tudo (inclui mensagens internas do http.server)
+        # Resumo periódico ("X GETs silenciados") a cada 50 supressões.
+        try:
+            msg = fmt % args
+        except TypeError:
+            msg = fmt
+        verbose = int(os.environ.get("CHESS_SCOUT_VERBOSE", "0") or "0")
+        is_error = bool(re.search(r'"\s+[45]\d\d', msg)) or " error" in msg.lower()
+        is_modify = any(m in msg for m in ('"POST', '"PUT', '"DELETE', '"PATCH'))
+
+        if verbose >= 2 or is_error or is_modify or verbose >= 1:
+            sys.stderr.write(f"[serve] {self.address_string()} - {msg}\n")
+            return
+
+        Handler._suppressed = getattr(Handler, "_suppressed", 0) + 1
+        if Handler._suppressed % 50 == 0:
+            sys.stderr.write(f"[serve] (silenciado: {Handler._suppressed} GETs OK; CHESS_SCOUT_VERBOSE=1 mostra)\n")
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -207,7 +228,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--verbose", "-v", action="count", default=0,
+                    help="Aumenta verbosidade do log: -v inclui GETs, -vv inclui mensagens internas. Sem -v: só erros e POSTs.")
     args = ap.parse_args()
+    if args.verbose:
+        os.environ["CHESS_SCOUT_VERBOSE"] = str(args.verbose)
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     # Garante schema antes de aceitar conexões.
