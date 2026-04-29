@@ -20,6 +20,13 @@ data/*.csv
 data/*.json
 data/history.db
 
+# Relatórios PDF (PII) — ficam só local
+data-reports/
+
+# Lifecycle do app (PIDs, logs do servidor)
+.app-state.json
+.app-logs/
+
 # Cache regenerável (2MB, recriado por scripts/export_cache.py)
 data/openings/position_cache.json
 

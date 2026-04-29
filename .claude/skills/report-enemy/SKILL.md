@@ -1,6 +1,6 @@
 ---
 name: report-enemy
-description: Gera um dossiê PDF (PT-BR) com a perspectiva "este é meu adversário, me ajude a vencê-lo". Lê dados de `data/history.db` (modo padrão `--from-db`) ou, em fallback, dos CSVs em `data/`. Identifica fortalezas a evitar e fragilidades a explorar, mapeia repertório (aberturas frequentes + onde ele perde) e propõe plano de combate concreto. Uso: invoque com o username como argumento.
+description: Gera um dossiê PDF (PT-BR) com a perspectiva "este é meu adversário, me ajude a vencê-lo". Lê dados de `data/history.db`. Identifica fortalezas a evitar e fragilidades a explorar, mapeia repertório (aberturas frequentes + onde ele perde) e propõe plano de combate concreto. Uso: invoque com o username como argumento.
 ---
 
 # Skill: report-enemy
@@ -39,22 +39,14 @@ Diretrizes específicas para perspectiva "enemy":
 
 ### 1. Validar entrada
 - `<username>` obrigatório. Se faltar, perguntar.
-- **Modo padrão (`--from-db`)**: `data/history.db` precisa ter partidas + análises do user. Cheque rapidamente:
-  ```bash
-  curl -s "http://127.0.0.1:8000/api/summary?username=<username>" 2>/dev/null \
-    || /opt/homebrew/bin/python3.12 -c "import sqlite3; c=sqlite3.connect('data/history.db'); print(c.execute('SELECT COUNT(*) FROM games WHERE username=?', ('<username>',)).fetchone()[0])"
-  ```
-- Se 0 partidas no DB, pedir ao usuário para iniciar o servidor (`python3.12 scripts/serve.py`), abrir http://127.0.0.1:8000/ e rodar coleta + análise. Como fallback, CSVs podem estar diretamente em `data/`.
+- `data/history.db` precisa ter partidas + análises do user. Se vazio, pedir para o usuário rodar `/app-start` e fazer coleta + análise via UI.
 
 ### 2. Computar métricas
-**Modo canônico** (lê `data/history.db`):
 ```bash
-/opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/compute.py <username> --from-db
+/opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/compute.py <username>
 ```
 
-Mesmo `compute.py` compartilhado. Se já houver `_computed.json` recente do mesmo ciclo (gerado por `report-myself`), reusa em vez de recomputar.
-
-**Fallback CSV** (sem `--from-db`): só se `history.db` estiver vazio para o user.
+Lê `data/history.db` (única fonte). Se já houver `_computed.json` recente do mesmo ciclo (gerado por `report-myself`), reusa em vez de recomputar.
 
 ### 3. Redigir as 10 seções
 
@@ -99,10 +91,8 @@ Salvar como `data/<username>_<timestamp>_enemy_sections.json`:
 ```bash
 /opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/build.py <username> enemy
 ```
-Gera `data/<username>/<username>_<timestamp>_enemy_report/<username>_<timestamp>_enemy_report.pdf`.
 
-- **Modo `--from-db`**: o build move só o computed.json e o sections.json para a pasta. Os dados-fonte ficam em `data/history.db`.
-- **Modo CSV (fallback)**: além de computed/sections, **move** os CSVs para a pasta, deixando `data/` raiz limpa.
+Gera `data-reports/<username>_enemy_<stamp>.pdf` (pasta única). Após o build, **deleta** computed.json e sections.json — `computed_json` fica preservado em `analyses` table no SQLite.
 
 ### 5. Reportar ao usuário
 - Caminho do PDF.

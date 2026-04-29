@@ -149,12 +149,6 @@
       color: #444;
       cursor: not-allowed;
     }
-    #btn-download {
-      display: none;
-      background: transparent;
-      color: #6fcf6f;
-      border: 1px solid #6fcf6f !important;
-    }
     #btn-analyze {
       display: none;
       background: transparent;
@@ -162,12 +156,6 @@
       border: 1px solid #4fc3f7 !important;
     }
     #btn-analyze:disabled { opacity: 0.5; cursor: not-allowed; }
-    #btn-download-analysis {
-      display: none;
-      background: transparent;
-      color: #c084fc;
-      border: 1px solid #c084fc !important;
-    }
     #btn-reset { background: transparent; color: #888; border: 1px solid #444 !important; }
     #btn-download-diag { background: transparent; color: #888; border: 1px solid #444 !important; font-size: 10px; }
     .preview { width: 100%; max-width: 1280px; margin-top: 24px; }
@@ -251,8 +239,6 @@
     <div class="actions">
       <button id="btn-fetch" onclick="fetchGames()" style="grid-column: span 2;">Buscar Partidas</button>
       <button id="btn-analyze" onclick="analyzeGames()" style="grid-column: span 2;">⚙ Analisar Stockfish</button>
-      <button id="btn-download" onclick="downloadCSV()">↓ CSV Partidas</button>
-      <button id="btn-download-analysis" onclick="downloadAnalysisCSV()">↓ CSV Análise</button>
       <button id="btn-download-diag" onclick="downloadDiagnostics()">↓ Diag API</button>
       <button id="btn-reset" onclick="resetSession()">🔄 Nova Análise</button>
     </div>
@@ -421,13 +407,14 @@
     el.textContent = `⏱ ${engLabel} d${d} (${basis}): ${lo} – ${hi}`;
   }
   function renderModeBadge() {
-    // Badge fica num <p> próprio (#mode-badge) pra não ser sobrescrito quando
-    // readConfig() refaz o textContent do #subtitle a cada mudança de parâmetro.
     const el = document.getElementById("mode-badge");
     if (!el) return;
-    el.innerHTML = SERVER_MODE
-      ? '<span style="color:#6fcf6f;background:#0a3a0a;padding:2px 8px;border-radius:3px;font-size:11px;letter-spacing:1px">SERVER MODE · history.db</span>'
-      : '<span style="color:#888;background:#222;padding:2px 8px;border-radius:3px;font-size:11px;letter-spacing:1px">FILE MODE · CSV</span>';
+    if (SERVER_MODE) {
+      el.innerHTML = '<span style="color:#6fcf6f;background:#0a3a0a;padding:2px 8px;border-radius:3px;font-size:11px;letter-spacing:1px">SERVER MODE · history.db</span>';
+    } else {
+      // CSV foi descontinuado; servidor é obrigatório.
+      el.innerHTML = '<span style="color:#e05555;background:#3a0a0a;padding:2px 8px;border-radius:3px;font-size:11px;letter-spacing:1px">⚠ SERVIDOR DESLIGADO — rode <code style="background:#1a0a0a;padding:1px 4px;border-radius:2px">scripts/start.sh</code> e abra http://127.0.0.1:8000/</span>';
+    }
   }
   document.addEventListener("DOMContentLoaded", () => {
     renderModeBadge();
@@ -517,8 +504,6 @@
     document.getElementById("log").innerHTML = '<span class="log-idle">Aguardando início...</span>';
     document.getElementById("stats").style.display = "none";
     document.getElementById("preview").style.display = "none";
-    document.getElementById("btn-download").style.display = "";
-    document.getElementById("btn-download-analysis").style.display = "";
     allGames = [];
     allAnalysis = [];
     terminateStockfish();
@@ -526,13 +511,16 @@
   }
 
   async function fetchGames() {
+    if (!SERVER_MODE) {
+      alert("Servidor desligado. Abra um terminal e rode `bash scripts/start.sh` (ou `/app-start`), depois acesse http://127.0.0.1:8000/.");
+      return;
+    }
     const btn = document.getElementById("btn-fetch");
     try { readConfig(); } catch (e) { alert(e.message); return; }
     btn.disabled = true;
     btn.textContent = "Buscando...";
     document.getElementById("stats").style.display = "none";
     document.getElementById("preview").style.display = "none";
-    document.getElementById("btn-download").style.display = "none";
     allGames = [];
     log("─".repeat(40), "log-idle");
     log(`▶ Nova busca: ${USERNAME} · ${TARGET} partidas/formato (${[...TIME_CLASSES].join("+")}) · depth ${STOCKFISH_DEPTH}`);
@@ -655,7 +643,6 @@
         tbody.appendChild(tr);
       });
       document.getElementById("preview").style.display = "block";
-      document.getElementById("btn-download").style.display = "block";
       document.getElementById("btn-analyze").style.display = "block";
 
     } catch (e) {
@@ -671,20 +658,6 @@
     const d = new Date();
     const pad = n => String(n).padStart(2, "0");
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  }
-
-  function downloadCSV() {
-    const csv = toCSV(allGames);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const stamp = timestamp();
-    a.download = `${USERNAME}_${stamp}_games_${allGames.length}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   }
 
   function normalizePGN(pgn) {
@@ -1117,6 +1090,10 @@
   }
 
   async function analyzeGames() {
+    if (!SERVER_MODE) {
+      alert("Servidor desligado. Abra um terminal e rode `bash scripts/start.sh` (ou `/app-start`).");
+      return;
+    }
     if (typeof Chess === "undefined") { log("❌ chess.js não carregou.", "log-err"); return; }
     if (!allGames.length) { log("⚠ Nenhuma partida para analisar.", "log-warn"); return; }
     try { readConfig(); } catch (e) { alert(e.message); return; }
@@ -1136,7 +1113,6 @@
     const fetchBtn = document.getElementById("btn-fetch");
     btn.disabled = true; fetchBtn.disabled = true;
     btn.textContent = "Analisando...";
-    document.getElementById("btn-download-analysis").style.display = "none";
     allAnalysis = [];
 
     let analyzedPositions = 0;
@@ -1336,36 +1312,14 @@
     } finally {
       btn.disabled = false; fetchBtn.disabled = false;
       btn.textContent = "⚙ Analisar Stockfish";
-      document.getElementById("btn-download-analysis").style.display = "block";
-
       if (allAnalysis.length) {
-        try {
-          downloadCSV();
-          await new Promise(r => setTimeout(r, 400));
-          downloadAnalysisCSV();
-          log(`💾 CSVs baixados (games + analysis). Mova-os para data/ e rode a skill chess-report ${USERNAME}.`, "log-ok");
-        } catch (e) {
-          log(`⚠ Download automático falhou (${e.message}). Use os botões "↓ Baixar CSV" e "↓ Baixar Análise".`, "log-warn");
-        }
+        log(`💾 ${allAnalysis.length} lances persistidos em history.db. Rode /report-myself ou /report-enemy ${USERNAME} para gerar PDF.`, "log-ok");
       } else {
-        log("⚠ Nenhum resultado para baixar.", "log-warn");
+        log("⚠ Nenhuma análise produzida.", "log-warn");
       }
     }
   }
 
-  function downloadAnalysisCSV() {
-    const csv = toCSV(allAnalysis);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const stamp = timestamp();
-    a.download = `${USERNAME}_${stamp}_analysis_d${STOCKFISH_DEPTH}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
 </script>
 
 </body>

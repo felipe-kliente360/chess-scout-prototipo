@@ -88,7 +88,7 @@ Browser → api.chess.com → ECO classifier → POST /api/games → SQLite
 ### 5. Compute do relatório
 
 ```bash
-python3.12 .claude/skills/_chess_shared/compute.py <username> --from-db
+python3.12 .claude/skills/_chess_shared/compute.py <username>
 ```
 
 Lê `games + game_analyses` direto do SQLite, sem CSV. Produz `<user>_<stamp>_computed.json` com:
@@ -123,7 +123,7 @@ A skill lê o computed JSON + `theory.md` (referência teórica), redige seçõe
 - Coletar partidas: `games` faz UPSERT idempotente — re-coletar não duplica.
 - Re-analisar com mesma depth: dedup pula 100% do Stockfish.
 - Subir depth (15 → 18): só re-roda nas plies onde a depth nova > existente.
-- Position facts: cacheados no DB após primeira execução de `compute --from-db`.
+- Position facts: cacheados no DB após primeira execução de `compute.py`.
 - Tactical themes: classificação pura no browser, instantânea.
 
 ---
@@ -158,7 +158,7 @@ A skill lê o computed JSON + `theory.md` (referência teórica), redige seçõe
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  compute.py --from-db <user>                                │
+│  compute.py <user>                                          │
 │  • Score (4 variantes) + faixa de incerteza                 │
 │  • Position_facts in-flight com cache delta no DB           │
 │  • Aggregados táticos + estruturais com win-rate            │
@@ -196,18 +196,18 @@ chess-scout-prototipo/
 │   ├── openings/
 │   │   ├── eco.json                      # Base ECO Lichess (3.690 posições)
 │   │   └── position_cache.json           # Cache exportado para o browser
-│   ├── tactical/
-│   │   └── themes_index.json             # Índice tático (4 MB, do woodpecker)
-│   └── <user>/<stamp>_*_report/          # Relatórios arquivados
+│   └── tactical/
+│       └── themes_index.json             # Índice tático (4 MB, do woodpecker)
+│
+├── data-reports/                         # PDFs finais — <user>_<perspective>_<stamp>.pdf
 │
 ├── scripts/
+│   ├── start.sh                          # Liga o app (idempotente, registra PIDs)
+│   ├── stop.sh                           # Desliga tudo registrado
 │   ├── serve.py                          # Servidor local (stdlib)
 │   ├── build_eco_index.py                # Constrói eco.json
-│   ├── build_position_cache.py           # Backfill cache
 │   ├── build_tactical_index.py           # Constrói themes_index.json
-│   ├── import_csv_to_db.py               # Migration CSV legado → SQLite
-│   ├── export_cache.py
-│   └── ... (outros utilitários)
+│   └── import_csv_to_db.py               # Migration legada CSV → SQLite (one-shot)
 │
 ├── tests/
 │   ├── conftest.py
@@ -320,10 +320,6 @@ Só faça se quiser regenerar uma base do zero — em uso normal nunca é necess
 # Reconstruir índice ECO a partir dos TSVs Lichess em data/openings/
 python3.12 scripts/build_eco_index.py
 
-# Reconstruir o cache de posições a partir do history.db
-python3.12 scripts/build_position_cache.py
-python3.12 scripts/export_cache.py
-
 # Reconstruir o índice tático (precisa baixar o release woodpecker primeiro)
 python3.12 scripts/build_tactical_index.py \
   --source /tmp/woodpecker-data \
@@ -331,25 +327,25 @@ python3.12 scripts/build_tactical_index.py \
   --min-count 3
 ```
 
-## Fluxo canônico hoje
+## Fluxo canônico
 
 ```bash
-# Terminal 1 — deixar rodando
-python3.12 scripts/serve.py
+# Liga o app (servidor + abre browser)
+bash scripts/start.sh         # ou /app-start
 ```
 
-Browser → http://127.0.0.1:8000/ → configurar → "Buscar Partidas" → "⚙ Analisar Stockfish".
+Configurar a UI → "Buscar Partidas" → "⚙ Analisar Stockfish".
 
 ```bash
-# Terminal 2 — gerar relatório
-/report-myself <username>     # via Claude Code
+# Gerar relatório (via Claude Code)
+/report-myself <username>
+/report-enemy <username>
+
+# Desligar quando terminar
+bash scripts/stop.sh          # ou /app-stop
 ```
 
-A skill chama `compute.py <user> --from-db` e `build.py <user> myself` automaticamente.
-
-## Modo legado (CSV)
-
-Funciona como fallback quando `history.db` está vazio para o user. Abrir `index.html` direto via `file://` exibe badge cinza `FILE MODE · CSV`. Os CSVs são baixados manualmente, copiados para `data/`, e o `compute.py` roda **sem** `--from-db`. Suportado mas não recomendado.
+PDFs vão direto pra `data-reports/<username>_<perspective>_<stamp>.pdf` — sem subpastas, sem CSV intermediário, sem JSON de apoio. O DB já guarda tudo em `analyses.computed_json` se precisar reprocessar.
 
 ---
 

@@ -423,23 +423,6 @@ def fetch_game_analyses(conn: sqlite3.Connection, game_id: str) -> list[dict]:
     return [dict(r) for r in cur.fetchall()]
 
 
-def dedup_map_for_user(conn: sqlite3.Connection, username: str) -> dict:
-    """Retorna {game_id: {ply: depth}} compacto pra dedup do browser.
-    Reduz payload em ~80% vs fetch_analyses_for_user (que carrega evaluation,
-    best_move, continuation, themes — campos que o browser não precisa para
-    decidir se pula o Stockfish)."""
-    cur = conn.execute("""
-      SELECT ga.game_id, ga.ply, ga.depth
-      FROM game_analyses ga
-      JOIN games g ON g.game_id = ga.game_id
-      WHERE g.username = ?
-    """, (username,))
-    out: dict[str, dict[int, int]] = {}
-    for row in cur.fetchall():
-        out.setdefault(row["game_id"], {})[int(row["ply"])] = int(row["depth"])
-    return out
-
-
 def fetch_analyses_for_user(conn: sqlite3.Connection, username: str,
                             min_depth: int = 0,
                             game_ids: list[str] | None = None) -> list[dict]:

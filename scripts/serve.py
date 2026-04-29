@@ -36,7 +36,7 @@ sys.path.insert(0, str(SHARED))
 from history import (  # type: ignore
     open_db, list_players, analysis_summary, fetch_games,
     upsert_games_batch, existing_game_ids, save_analysis_batch,
-    fetch_analyses_for_user, games_needing_analysis, dedup_map_for_user,
+    fetch_analyses_for_user, games_needing_analysis,
 )
 
 DB_PATH = ROOT / "data" / "history.db"
@@ -144,13 +144,6 @@ class Handler(BaseHTTPRequestHandler):
                 # específicas (reduz payload qdo browser quer só sessão atual).
                 game_ids = parse_csv_param(qs, "game_ids") or None
                 return _json(self, fetch_analyses_for_user(conn, u, min_depth, game_ids))
-
-            if path == "/api/analyses/dedup-map":
-                # Payload enxuto: só {game_id: {ply: depth}} pra dedup do browser.
-                # ~80% menor que /api/analyses (sem evaluation/best_move/themes).
-                u = (qs.get("username", [""])[0] or "").strip()
-                if not u: return _bad(self, "username obrigatório")
-                return _json(self, dedup_map_for_user(conn, u))
 
             return _bad(self, f"endpoint não encontrado: {path}", status=404)
         finally:

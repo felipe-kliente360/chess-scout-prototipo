@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -26,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SHARED_DIR = Path(__file__).resolve().parent
 SKILLS_DIR = SHARED_DIR.parent
 DATA_DIR = ROOT / "data"
+REPORTS_DIR = ROOT / "data-reports"
 DATE_RE = re.compile(r"(\d{8}T\d{6}|\d{4}-\d{2}-\d{2})")
 
 VALID_PERSPECTIVES = {"myself", "enemy"}
@@ -136,8 +136,7 @@ def main():
 
     if not DATA_DIR.is_dir():
         raise SystemExit(f"❌ Pasta de dados não encontrada: {DATA_DIR}")
-    user_dir = DATA_DIR / username
-    user_dir.mkdir(exist_ok=True)
+    REPORTS_DIR.mkdir(exist_ok=True)
 
     computed_file = latest(DATA_DIR, f"{username}_*_computed.json", f"{username}_computed_*.json")
     sections_file = latest(
@@ -200,30 +199,34 @@ def main():
     template = env.get_template("template.html")
     html_str = template.render(c=computed, s=sections, stamp=stamp, perspective=perspective)
 
-    report_dir = user_dir / f"{username}_{stamp}_{perspective}_report"
-    report_dir.mkdir(exist_ok=True)
-    out_pdf = report_dir / f"{username}_{stamp}_{perspective}_report.pdf"
+    # Output centralizado em data-reports/ (item 12 do roadmap):
+    # nome canônico curto sem subpasta, computed.json fica só no SQLite.
+    out_pdf = REPORTS_DIR / f"{username}_{perspective}_{stamp}.pdf"
     HTML(string=html_str, base_url=str(skill_dir)).write_pdf(str(out_pdf))
 
+    # Limpa artefatos de apoio: computed.json, sections.json, e CSVs intermediários
+    # (modo legado). O computed_json fica preservado em analyses table (SQLite),
+    # então reprocessar com template novo continua possível.
     games_csv = computed.get("source_games_csv")
     analysis_csv = computed.get("source_analysis_csv")
-    sources = [computed_file, sections_file]
+    artifacts = [computed_file, sections_file]
     for name in (games_csv, analysis_csv):
-        if name:
+        if name and not name.startswith("history.db"):
             p = DATA_DIR / name
             if p.exists():
-                sources.append(p)
-    for src in sources:
+                artifacts.append(p)
+    cleaned = 0
+    for art in artifacts:
         try:
-            dest = report_dir / src.name
-            if dest.exists():
-                dest.unlink()
-            shutil.move(str(src), str(dest))
+            if art.exists():
+                art.unlink()
+                cleaned += 1
         except Exception as e:
-            print(f"⚠ não consegui mover {src.name}: {e}")
+            print(f"⚠ não consegui limpar {art.name}: {e}")
 
     print(f"✅ {out_pdf}")
-    print(f"📦 artefatos em {report_dir}")
+    if cleaned:
+        print(f"🧹 {cleaned} artefatos de apoio removidos (computed_json preservado em analyses table)")
 
 
 if __name__ == "__main__":

@@ -29,31 +29,6 @@ MATE_CAP_PAWNS = 10.0
 LOSS_CAP_CP = 1000
 
 
-def find_latest_csvs(username: str) -> tuple[Path, Path, str]:
-    """CSVs sempre vivem em data/ (raiz). A pasta por user é criada só ao gerar o relatório."""
-    games = sorted(
-        list(DATA_DIR.glob(f"{username}_*_games_*.csv"))
-        + list(DATA_DIR.glob(f"{username}_games_*.csv")),
-        key=lambda p: p.stat().st_mtime,
-    )
-    analyses = sorted(
-        list(DATA_DIR.glob(f"{username}_*_analysis_d*.csv"))
-        + list(DATA_DIR.glob(f"{username}_analysis_d*_*.csv")),
-        key=lambda p: p.stat().st_mtime,
-    )
-    if not games or not analyses:
-        raise SystemExit(
-            f"❌ CSVs não encontrados em {DATA_DIR}. "
-            f"Esperado: {username}_<timestamp>_games_<N>.csv e {username}_<timestamp>_analysis_d<N>.csv "
-            f"(coloque-os diretamente em data/)"
-        )
-    games_path = games[-1]
-    analysis_path = analyses[-1]
-    stamp_match = DATE_RE.search(analysis_path.name) or DATE_RE.search(games_path.name)
-    stamp = stamp_match.group(1) if stamp_match else date.today().strftime("%Y%m%dT%H%M%S")
-    return games_path, analysis_path, stamp
-
-
 
 def cp_from_row(row) -> float:
     """Eval em centipeões (perspectiva das brancas). Mate vira ±MATE_CAP."""
@@ -521,26 +496,12 @@ def load_from_db(username: str) -> tuple[pd.DataFrame, pd.DataFrame, int | None,
 
 def main():
     if len(sys.argv) < 2:
-        raise SystemExit("Uso: python compute.py <username> [--from-db]")
+        raise SystemExit("Uso: python compute.py <username>")
     username = sys.argv[1].strip()
-    from_db = "--from-db" in sys.argv[2:]
     if not DATA_DIR.is_dir():
         raise SystemExit(f"❌ Pasta de dados não encontrada: {DATA_DIR}")
-
-    if from_db:
-        print(f"📦 lendo de history.db (modo --from-db)")
-        games_df, an_df, depth, stamp = load_from_db(username)
-        # game_id estável; quando há mistura de depths, pega o mínimo (mais conservador)
-        # — confidence_pct usa esse depth pra calibração.
-        games_path = analysis_path = None
-    else:
-        games_path, analysis_path, stamp = find_latest_csvs(username)
-        print(f"📁 games:    {games_path.name}")
-        print(f"📁 analysis: {analysis_path.name}")
-        games_df = pd.read_csv(games_path)
-        an_df = pd.read_csv(analysis_path)
-        depth_match = re.search(r"_d(\d+)(?:[_.])", analysis_path.name)
-        depth = int(depth_match.group(1)) if depth_match else None
+    # Único caminho: lê games + game_analyses do SQLite. CSV foi descontinuado.
+    games_df, an_df, depth, stamp = load_from_db(username)
 
     n_games = len(games_df)
     n_positions = len(an_df)
@@ -1388,8 +1349,8 @@ def main():
         "username": username,
         "stamp": stamp,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "source_games_csv": games_path.name if games_path else "history.db:games",
-        "source_analysis_csv": analysis_path.name if analysis_path else "history.db:game_analyses",
+        "source_games_csv": "history.db:games",
+        "source_analysis_csv": "history.db:game_analyses",
         "stockfish_depth": depth,
         "sample_quality": {
             "tier": sample_tier,
@@ -1465,8 +1426,8 @@ def main():
         record_analysis(conn, payload, perspective=None)
         # Cache de position_facts: para cada lance flagrado cujo facts foi
         # computado in-flight, grava o JSON na coluna position_facts. Próxima
-        # execução de compute --from-db lê direto, sem recomputar.
-        if from_db:
+        # execução de compute lê direto, sem recomputar.
+        if True:
             facts_to_cache = []
             for _, mv in moves_df.iterrows():
                 if not mv.get("_facts_computed_now"):

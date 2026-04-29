@@ -1,6 +1,6 @@
 ---
 name: report-myself
-description: Gera um relatório PDF (PT-BR) com a perspectiva "este jogador sou eu" — diagnóstico próprio + plano de estudo. Lê dados de `data/history.db` (modo padrão `--from-db`) ou, em fallback, dos CSVs em `data/`. Calcula KPIs (Score 0–10, confiança estatística, repertório ECO), identifica fortalezas/fragilidades e prescreve estudo priorizado para os próximos 30 dias. Uso: invoque com o username como argumento.
+description: Gera um relatório PDF (PT-BR) com a perspectiva "este jogador sou eu" — diagnóstico próprio + plano de estudo. Lê dados de `data/history.db`. Calcula KPIs (Score 0–10, confiança estatística, repertório ECO), identifica fortalezas/fragilidades e prescreve estudo priorizado para os próximos 30 dias. Uso: invoque com o username como argumento.
 ---
 
 # Skill: report-myself
@@ -45,24 +45,19 @@ Diretrizes de estilo:
 
 ### 1. Validar entrada
 - Argumento: `<username>`. Se faltar, perguntar.
-- **Modo padrão (`--from-db`)**: `data/history.db` precisa ter partidas + análises do user. Cheque rapidamente:
+- **Pré-requisito**: `data/history.db` precisa ter partidas + análises do user. Cheque rapidamente:
   ```bash
   curl -s "http://127.0.0.1:8000/api/summary?username=<username>" 2>/dev/null \
     || /opt/homebrew/bin/python3.12 -c "import sqlite3; c=sqlite3.connect('data/history.db'); print(c.execute('SELECT COUNT(*) FROM games WHERE username=?', ('<username>',)).fetchone()[0])"
   ```
-- Se 0 partidas no DB: pedir ao usuário para iniciar o servidor (`python3.12 scripts/serve.py`), abrir http://127.0.0.1:8000/ e rodar coleta + análise. CSV manual é fallback (vide §1b abaixo).
-
-#### 1b. Fallback CSV (apenas se history.db estiver vazio para o user)
-- `data/` (raiz) precisa ter par `<username>_*_games_*.csv` + `<username>_*_analysis_d*.csv`.
-- Nesse caso, rodar `compute.py` **sem** `--from-db`.
+- Se 0 partidas no DB: pedir ao usuário para iniciar o app (`/app-start` ou `bash scripts/start.sh`), abrir http://127.0.0.1:8000/ e rodar coleta + análise.
 
 ### 2. Computar métricas
-**Modo canônico** (lê `data/history.db`, sem precisar de CSV em `data/` raiz):
 ```bash
-/opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/compute.py <username> --from-db
+/opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/compute.py <username>
 ```
 
-Gera `data/<username>_<timestamp>_computed.json` com: Score 10 em todos os agregados (geral, competitivo, ponderado, média por modalidade, faixa de incerteza por depth), `confidence_pct`, `openings_by_family`, `openings_weak_spots`, `eco_stats`, `tactical_themes_top`, `tactical_themes_by_phase`, partidas paradigmáticas com FENs e temas táticos por key_position.
+Lê `data/history.db` (única fonte). Gera `data/<username>_<timestamp>_computed.json` com: Score 10 em todos os agregados (geral, competitivo, ponderado, média por modalidade, faixa de incerteza por depth), `confidence_pct`, `openings_by_family`, `openings_weak_spots`, `eco_stats`, `tactical_themes_top`, `tactical_themes_by_phase`, partidas paradigmáticas com FENs e temas táticos por key_position.
 
 > **macOS:** use Python do Homebrew (`/opt/homebrew/bin/python3.12`). O Python do sistema não carrega Pango/GObject por SIP. Se faltar: `brew install python@3.12 pango && python3.12 -m pip install --break-system-packages pandas jinja2 chess weasyprint`.
 
@@ -104,10 +99,10 @@ Salvar como `data/<username>_<timestamp>_myself_sections.json`:
 ```bash
 /opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/build.py <username> myself
 ```
-Gera `data/<username>/<username>_<timestamp>_myself_report/<username>_<timestamp>_myself_report.pdf`.
 
-- **Modo `--from-db`**: o build move só o computed.json e o sections.json para a pasta do relatório. Os dados-fonte ficam em `data/history.db` — para gerar `report-enemy` do mesmo ciclo basta rodar `compute.py <user> --from-db` de novo.
-- **Modo CSV (fallback)**: além do computed/sections, **move** os CSVs originais para a pasta do relatório, deixando `data/` raiz limpa. Para gerar `report-enemy` do mesmo ciclo, copiar de volta: `cp data/<user>/<user>_<stamp>_myself_report/*.csv data/`.
+Gera `data-reports/<username>_myself_<stamp>.pdf` (pasta única, sem subpasta por user). Após o build, **deleta** os artefatos de apoio (computed.json, sections.json) — o `computed_json` fica preservado em `analyses` table no SQLite caso precise reprocessar.
+
+Para gerar `report-enemy` do mesmo ciclo, basta rodar `compute.py <user>` de novo (o DB tem tudo).
 
 ### 5. Reportar ao usuário
 - Caminho do PDF.
