@@ -162,4 +162,3 @@ Pendências menores remanescentes (limpeza CSV, dead code e revisão da geraçã
 - Reduzir verbosidade do log do servidor: hoje cada GET /api/* aparece em stderr, polui terminal em sessões longas.
 - Adicionar PRAGMA `journal_mode=WAL` em `open_db` para tolerar concorrência futura (compute.py + browser ao mesmo tempo).
 - Documentar formato dos fingerprints B/C tático em `theory.md` (hoje só em `build_tactical_index.py` docstring).
-- Política de retenção em `data-reports/legacy-pre-recalibracao/`: 7 PDFs gerados antes da recalibração de Score. Decidir se vale regerar (custo: 0min se DB tem dados) ou descartar.
