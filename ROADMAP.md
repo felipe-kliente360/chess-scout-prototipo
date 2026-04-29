@@ -74,6 +74,11 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 - `signature_delta_flags` compara assinatura cacheada vs atual e devolve flag por seção (`reuse` | `regenerate`) com heurísticas: n_games delta >20% regenera tudo; score delta >0.5 regenera 1/2/6/9/11; fase delta >0.3 regenera 2/6; top_openings/tactical_top1/paradigmaticas mudaram regeneram a respectiva seção.
 - CLI `cache_lookup.py <user> <perspective>` retorna `{cached, sections, delta_flags, reuse_recommendation}`. Skills `report-myself`/`report-enemy`/`report-coach` consultam antes de redigir; em `partial_regen` regeneram só seções com flag, copiam o resto. Economia ~10× em tokens quando muda pouco.
 
+### Coleta — toggle de cota + detecção de tendência
+
+- **Modo de cota** (`QUOTA_MODE`): radio "por estilo" (atual: TARGET × N formatos) vs "total (recência)" (TARGET partidas mais recentes do conjunto). Resolve fricção de quem joga 80% rapid e antes era forçado a buscar bullet só pra cumprir cota.
+- **Pré-get de tendência** (`fetchProfileTrend`): puxa últimos 60 dias do perfil chess.com, peso `exp(-days/30)` (meia-vida 30d), agrega por `time_class`. UI mostra distribuição ponderada + delta primeiros 30d vs últimos 30d (ex: "rapid 78%, blitz 18% · rapid ↑12pp"). Botão dedicado para evitar fetch automático.
+
 ### Telemetria de execução (recalibração da estimativa)
 
 - Tabela `execution_logs (id, username, started_at, ended_at, duration_seconds, depth, engine, n_games, n_positions_total, n_positions_analyzed, n_db_hits, n_cache_hits, n_cache_misses, n_failures, expected_seconds_at_start, status)`.

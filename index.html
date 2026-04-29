@@ -194,8 +194,19 @@
         <input type="text" id="input-username" value="miguelrov" />
       </label>
       <label>
-        Qtd. partidas <span style="color:#888;font-size:0.85em">(por formato)</span>
+        Qtd. partidas <span id="target-hint" style="color:#888;font-size:0.85em">(por formato)</span>
         <input type="number" id="input-target" value="50" min="1" max="500" />
+      </label>
+      <label>
+        Modo de cota
+        <div class="quota-mode" style="display:flex;gap:14px;font-size:0.9em;padding:4px 0">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="radio" name="quota-mode" value="per-style" checked> por estilo
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="radio" name="quota-mode" value="total"> total (recência)
+          </label>
+        </div>
       </label>
       <label>
         Depth Stockfish <span id="depth-hint" style="color:#888;font-size:0.85em">(15 = padrão recomendado)</span>
@@ -215,6 +226,10 @@
           <label class="tf"><input type="checkbox" class="tf-cb" value="blitz" checked> blitz</label>
           <label class="tf"><input type="checkbox" class="tf-cb" value="rapid" checked> rapid</label>
           <label class="tf"><input type="checkbox" class="tf-cb" value="daily" checked> daily</label>
+        </div>
+        <div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button id="btn-trend" type="button" onclick="fetchProfileTrend()" style="font-size:0.8em;padding:3px 8px">🔍 Detectar tendência (60d)</button>
+          <span id="trend-hint" style="color:#888;font-size:0.85em">— clique para ver distribuição recente</span>
         </div>
       </label>
     </div>
@@ -279,6 +294,9 @@
   let STOCKFISH_DEPTH = 18;
   let ENGINE = "local";
   let TIME_CLASSES = new Set(["bullet", "blitz", "rapid", "daily"]);
+  // QUOTA_MODE: "per-style" = TARGET por formato (atual); "total" = TARGET partidas
+  // mais recentes do conjunto de formatos selecionados (qualquer mix).
+  let QUOTA_MODE = "per-style";
   let allGames = [];
   let allAnalysis = [];
 
@@ -294,27 +312,114 @@
     return res.json();
   }
 
+  // Pré-get de tendência: pega últimos 60 dias do perfil chess.com,
+  // pondera por recência (exp(-days/30) — meia-vida 30d) para enxergar
+  // tendência atual do estilo de jogo. Mostra a distribuição na UI
+  // como dica para o usuário escolher os formatos certos antes da análise.
+  async function fetchProfileTrend() {
+    const u = (document.getElementById("input-username").value || "").trim();
+    const hint = document.getElementById("trend-hint");
+    const btn = document.getElementById("btn-trend");
+    if (!u) { hint.textContent = "— informe o username primeiro"; return; }
+    btn.disabled = true; btn.textContent = "buscando...";
+    hint.textContent = "buscando últimos 60 dias...";
+    try {
+      const archRes = await fetch(`https://api.chess.com/pub/player/${u}/games/archives`);
+      if (!archRes.ok) throw new Error(`status ${archRes.status}`);
+      const { archives } = await archRes.json();
+      if (!archives?.length) throw new Error("sem arquivos");
+      // Pega os 3 arquivos mais recentes (cobre ~90 dias com folga; filtra <60d).
+      const tail = archives.slice(-3);
+      const cutoffMs = Date.now() - 60 * 86400_000;
+      const halfMs = Date.now() - 30 * 86400_000;
+      const tau_days = 30;
+      const weighted = {};   // {time_class: peso acumulado}
+      const recent = {};     // últimos 30d (raw count)
+      const older = {};      // 30-60d (raw count)
+      let totalGames = 0, totalRecent = 0, totalOlder = 0;
+      for (const url of tail) {
+        const r = await fetch(url);
+        if (!r.ok) continue;
+        const { games } = await r.json();
+        if (!games?.length) continue;
+        for (const g of games) {
+          const endMs = (g.end_time || 0) * 1000;
+          if (!endMs || endMs < cutoffMs) continue;
+          const tc = g.time_class || "rapid";
+          const daysAgo = (Date.now() - endMs) / 86400_000;
+          const w = Math.exp(-daysAgo / tau_days);
+          weighted[tc] = (weighted[tc] || 0) + w;
+          if (endMs >= halfMs) {
+            recent[tc] = (recent[tc] || 0) + 1;
+            totalRecent++;
+          } else {
+            older[tc] = (older[tc] || 0) + 1;
+            totalOlder++;
+          }
+          totalGames++;
+        }
+      }
+      if (!totalGames) {
+        hint.textContent = "— sem partidas nos últimos 60 dias";
+        return;
+      }
+      const totalWeight = Object.values(weighted).reduce((a, b) => a + b, 0) || 1;
+      const distribuicao = Object.entries(weighted)
+        .map(([tc, w]) => ({ tc, pct: Math.round(100 * w / totalWeight) }))
+        .sort((a, b) => b.pct - a.pct)
+        .filter(e => e.pct > 0);
+      // Detecta tendência: top class subiu/caiu entre os 30d antigos e os 30d novos?
+      const top = distribuicao[0]?.tc;
+      let trendNote = "";
+      if (top && totalRecent > 0 && totalOlder > 0) {
+        const recentPct = Math.round(100 * (recent[top] || 0) / totalRecent);
+        const olderPct = Math.round(100 * (older[top] || 0) / totalOlder);
+        const delta = recentPct - olderPct;
+        if (Math.abs(delta) >= 10) {
+          trendNote = ` · ${top} ${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}pp (${olderPct}%→${recentPct}%)`;
+        }
+      }
+      const dist = distribuicao.map(e => `${e.tc} ${e.pct}%`).join(" · ");
+      hint.textContent = `60d ponderado: ${dist} (${totalGames} partidas)${trendNote}`;
+      hint.style.color = "#5a8";
+      // Auto-marca os formatos que aparecem (apenas se usuário não desmarcou).
+      // Não altera escolha existente — só sugere via cor; deixa decisão ao user.
+    } catch (e) {
+      hint.textContent = `— falha (${e.message})`;
+      hint.style.color = "#c66";
+    } finally {
+      btn.disabled = false; btn.textContent = "🔍 Detectar tendência (60d)";
+    }
+  }
+
   function readConfig() {
     const u = document.getElementById("input-username").value.trim();
     const t = parseInt(document.getElementById("input-target").value, 10);
     const d = parseInt(document.getElementById("input-depth").value, 10);
     const eng = document.getElementById("input-engine").value;
     const selectedTC = Array.from(document.querySelectorAll(".tf-cb:checked")).map(cb => cb.value);
+    const quotaMode = document.querySelector('input[name="quota-mode"]:checked')?.value || "per-style";
     if (!u) throw new Error("Username vazio.");
     if (!t || t < 1) throw new Error("Quantidade inválida.");
     if (!d || d < 1 || d > 22) throw new Error("Depth deve estar entre 1 e 22.");
     if (!selectedTC.length) throw new Error("Selecione pelo menos um formato (bullet, blitz, rapid ou daily).");
-    // Cap total: TARGET × nFormatos ≤ 400. Evita rodar overnight sem perceber.
-    const totalGames = t * selectedTC.length;
+    // Cap total: depende do modo. per-style: TARGET × N formatos. total: TARGET.
+    const totalGames = quotaMode === "total" ? t : t * selectedTC.length;
     if (totalGames > 400) {
-      throw new Error(`${t} × ${selectedTC.length} formatos = ${totalGames} partidas excede o limite de 400. Reduza qtd ou formatos.`);
+      const detail = quotaMode === "total" ? `${t} no total` : `${t} × ${selectedTC.length} formatos = ${totalGames}`;
+      throw new Error(`${detail} partidas excede o limite de 400. Reduza qtd ou formatos.`);
     }
     USERNAME = u;
     TARGET = t;
     STOCKFISH_DEPTH = d;
     ENGINE = eng === "local" ? "local" : "api";
     TIME_CLASSES = new Set(selectedTC);
-    document.getElementById("subtitle").textContent = `${USERNAME} · ${TARGET} partidas · depth ${STOCKFISH_DEPTH} · ${selectedTC.join("+")} · ${ENGINE}`;
+    QUOTA_MODE = quotaMode;
+    const subtitleQuota = quotaMode === "total" ? `${t} total` : `${t}/formato`;
+    document.getElementById("subtitle").textContent = `${USERNAME} · ${subtitleQuota} · depth ${STOCKFISH_DEPTH} · ${selectedTC.join("+")} · ${ENGINE}`;
+    // Atualiza dica do campo qtd. partidas conforme o modo
+    const targetHint = document.getElementById("target-hint");
+    if (targetHint) targetHint.textContent = quotaMode === "total" ? "(total)" : "(por formato)";
   }
 
   // Calibração observada (preenchida sob demanda via /api/execution-logs/calibration).
@@ -371,7 +476,9 @@
       return allGames.reduce((acc, g) => acc + countPlies(g.pgn), 0);
     }
     const nClasses = TIME_CLASSES.size || 1;
-    return TARGET * nClasses * 80;  // alvo = TARGET por formato * nFormatos * 80 plies
+    // per-style: TARGET por formato × N formatos × ~80 plies. total: TARGET × ~80 plies.
+    const expectedGames = QUOTA_MODE === "total" ? TARGET : TARGET * nClasses;
+    return expectedGames * 80;
   }
 
   function expectedCacheHitRate() {
@@ -428,9 +535,13 @@
     const avgPlies = avgPliesFromGames();
     const engLabel = eng === "local" ? "Stockfish local" : "API remota";
     const cacheNote = hitRate > 0 ? ` · cache ~${Math.round(hitRate * 100)}%` : "";
+    const expectedGames = QUOTA_MODE === "total" ? TARGET : TARGET * TIME_CLASSES.size;
+    const basisFormula = QUOTA_MODE === "total"
+      ? `${TARGET} total (recência) em ${TIME_CLASSES.size} formato${TIME_CLASSES.size > 1 ? "s" : ""}`
+      : `${TARGET}/formato × ${TIME_CLASSES.size} = ~${expectedGames} partidas`;
     const basis = allGames.length
       ? `${allGames.length} partidas (${avgPlies} lances/partida em média, ${positions} posições${cacheNote})`
-      : `${TARGET}/formato × ${TIME_CLASSES.size} = ~${TARGET * TIME_CLASSES.size} partidas, ~${positions} posições`;
+      : `${basisFormula}, ~${positions} posições`;
     el.textContent = `⏱ ${engLabel} d${d} (${basis}): ${lo} – ${hi}`;
   }
   function renderModeBadge() {
@@ -449,6 +560,8 @@
     document.getElementById("input-engine").addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); });
     document.querySelectorAll(".tf-cb").forEach(cb =>
       cb.addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); }));
+    document.querySelectorAll('input[name="quota-mode"]').forEach(r =>
+      r.addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); }));
     updateEstimate();
   });
 
@@ -542,7 +655,8 @@
     document.getElementById("preview").style.display = "none";
     allGames = [];
     log("─".repeat(40), "log-idle");
-    log(`▶ Nova busca: ${USERNAME} · ${TARGET} partidas/formato (${[...TIME_CLASSES].join("+")}) · depth ${STOCKFISH_DEPTH}`);
+    const quotaLabel = QUOTA_MODE === "total" ? `${TARGET} total` : `${TARGET}/formato`;
+    log(`▶ Nova busca: ${USERNAME} · ${quotaLabel} (${[...TIME_CLASSES].join("+")}) · depth ${STOCKFISH_DEPTH}`);
 
     try {
       log("Carregando base ECO (Lichess)...");
@@ -561,15 +675,20 @@
 
       log(`${archives.length} meses encontrados. Coletando partidas...`);
 
-      // Contadores por formato — TARGET é POR formato, não global
+      // Contadores: per-style = um por formato; total = um único global.
       const counters = {};
       TIME_CLASSES.forEach(tc => counters[tc] = 0);
-      const allTargetsMet = () => [...TIME_CLASSES].every(tc => counters[tc] >= TARGET);
-      const fmtCounters = () => [...TIME_CLASSES].map(tc => `${tc}:${counters[tc]}/${TARGET}`).join(" ");
+      let totalCount = 0;
+      const isQuotaMet = QUOTA_MODE === "total"
+        ? () => totalCount >= TARGET
+        : () => [...TIME_CLASSES].every(tc => counters[tc] >= TARGET);
+      const fmtCounters = QUOTA_MODE === "total"
+        ? () => `total:${totalCount}/${TARGET} (${[...TIME_CLASSES].map(tc => `${tc}:${counters[tc]}`).join(" ")})`
+        : () => [...TIME_CLASSES].map(tc => `${tc}:${counters[tc]}/${TARGET}`).join(" ");
 
       const collected = [];
       for (let i = archives.length - 1; i >= 0; i--) {
-        if (allTargetsMet()) break;
+        if (isQuotaMet()) break;
         const url = archives[i];
         const month = url.split("/").slice(-2).join("/");
         log(`Lendo ${month}... (${fmtCounters()})`);
@@ -588,11 +707,17 @@
           const g = parsed[j];
           const tc = g.time_class;
           if (!TIME_CLASSES.has(tc)) { skippedTime++; continue; }
-          if (counters[tc] >= TARGET) { skippedFull++; continue; }
+          if (QUOTA_MODE === "total") {
+            if (totalCount >= TARGET) { skippedFull++; continue; }
+          } else {
+            if (counters[tc] >= TARGET) { skippedFull++; continue; }
+          }
           if (countPlies(g.pgn) < MIN_PLIES) { skippedShort++; continue; }
           collected.push(g);
           counters[tc]++;
+          totalCount++;
           added++;
+          if (QUOTA_MODE === "total" && totalCount >= TARGET) break;
         }
         const notes = [
           skippedTime ? `${skippedTime} ritmo` : "",
