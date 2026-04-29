@@ -58,7 +58,13 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 - Stockfish WASM com Hash 256MB (10–20% mais rápido em finais com transposições).
 - Flush por partida (não batch 80) — alinha unidade de persistência com unidade lógica.
 - Filtro `?game_ids=...` em `/api/analyses` — payload proporcional à sessão atual.
-- Endpoint `dedup-map` enxuto (60 KB raw / 2 KB gzip pra 100 jogos).
+
+### Lifecycle e output (commits `397956f`/`13ce2e1`)
+
+- **Skills `/app-start` e `/app-stop`** + scripts `start.sh`/`stop.sh`. PIDs registrados em `.app-state.json`, idempotente, com fallback `pgrep` defensivo.
+- **Output centralizado em `data-reports/`**: PDFs no formato `<user>_<perspective>_<stamp>.pdf`, sem subpastas. Computed.json e sections.json deletados após build (preservados em `analyses.computed_json`).
+- **CSV legado completamente removido**: `find_latest_csvs` apagado, `--from-db` deixou de ser flag (vira default), botões CSV removidos da UI, modo FILE bloqueia operação com mensagem de instrução. Pipeline 100% via SQLite.
+- **Dead code removido**: 5 scripts legados (`build_position_cache`, `enrich_eco`, `export_cache`, `filter_short_games`, `import_new_analysis`), helper `dedup_map_for_user` + endpoint `/api/analyses/dedup-map`, import órfão de `shutil`.
 
 ### Qualidade
 
@@ -123,24 +129,6 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 **Como:** Service worker que mantém `position_cache` em IndexedDB; sync periódico com SQLite via download/upload manual.
 **Custo:** 1 dia. Trade-off: hoje o `serve.py` é stdlib e simples; PWA adiciona complexidade.
 
-### 11. Skills `/app-start` e `/app-stop` (lifecycle do app)
-**Por quê:** hoje o usuário precisa lembrar de rodar `python3.12 scripts/serve.py` em terminal separado e matar o processo no fim. Friction real, esquecimento garante. Quando o app crescer (worker de análise, fila, etc.), serão múltiplos processos pra orquestrar.
-**Como:** Duas skills/slash-commands:
-- `/app-start` — sobe `serve.py` em background, valida que API responde em http://127.0.0.1:8000/api/health, abre o navegador na URL, salva PIDs em `.app-state.json` para o stop saber o que matar. Idempotente: se já está rodando, só reusa.
-- `/app-stop` — lê `.app-state.json`, mata todos os processos registrados, limpa o arquivo. Imprime resumo do que foi parado.
-Conforme o app ganha mais processos (worker Stockfish nativo do item 1, agendador de retentativas, etc.), eles entram automaticamente nesse lifecycle. Skill conhece a topologia; usuário não precisa saber.
-**Custo:** 3h pra MVP (só serve.py); +2h por processo extra que entrar.
-
-### 12. Centralizar output em `data-reports/` e limpar arquivos de apoio
-**Por quê:** hoje cada `compute.py` + `build.py` produz uma cerimônia de arquivos: `data/<user>_<stamp>_computed.json` na raiz, `_sections.json`, depois `build.py` move tudo pra `data/<user>/<user>_<stamp>_<perspective>_report/` que vira pasta separada por relatório. Vira ruído, dificulta achar o PDF, e os artefatos intermediários (JSON, sections) raramente são consultados depois.
-**Como:**
-- Pasta única `data-reports/` com **só os PDFs**: `data-reports/<username>_<perspective>_<stamp>.pdf`
-- Ao final de `build.py`: gera o PDF lá, e **deleta** os artefatos de apoio (computed.json, sections.json, CSV se houver). O `analyses` table no SQLite já guarda o `computed_json` completo se precisar reprocessar.
-- Pasta `data/<user>/` legada: deletada (subdir hoje só serve pra arquivar pares de relatório, redundante com `analyses` table).
-- Quando reprocessar com template novo for necessário (caso futuro), recuperar o `computed_json` do SQLite e re-redigir as sections.
-**Trade-off**: perde a capacidade de "diff" entre dois sections.json antigos sem reprocessar. Mas o redator é determinístico relativo ao computed; raramente vale.
-**Custo:** 2h.
-
 ---
 
 ## ❓ Decisões estratégicas em aberto
@@ -172,39 +160,11 @@ Conforme o app ganha mais processos (worker Stockfish nativo do item 1, agendado
 
 ## 📌 Backlog anotado em 2026-04-29
 
-Itens identificados durante o ciclo de melhorias mas não executados. Trazer próximo ciclo.
-
-### Limpeza do método CSV legado
-
-Pipeline CSV existe hoje só como fallback quando `history.db` está vazio para o user. Considerar remoção completa:
-
-- Apagar funções `find_latest_csvs`; `--from-db` deixa de ser flag e vira default
-- Remover `scripts/import_csv_to_db.py` após validar que não há mais CSVs históricos a importar
-- Remover modo `FILE MODE` do `index.html` (badge cinza, fluxo de download de CSV)
-- Skills `report-myself` / `report-enemy` deixam de mencionar fallback CSV
-- README perde a seção "Modo legado (CSV)"
-
-Trade-off: simplifica codebase em ~200 linhas mas obriga rodar servidor local sempre. Aceitável dado que servidor é stdlib (zero deps externas).
-
-### Limpeza de históricos e dead code
-
-- `data/<user>/*_report/` arquivados: revisar se há PDFs antigos com modelos/scores desatualizados que poluem comparação longitudinal
-- `position_cache.json` exportado para o browser: confirmar se ainda é usado dado que `game_analyses` no DB cobre o mesmo papel via API
-- `scripts/`: 6+ scripts legados (build_position_cache, export_cache, enrich_eco, filter_short_games, import_new_analysis) — auditoria de quais ainda fazem sentido
-- `compute.py`: depois da refatoração `--from-db` e remoção do fallback CSV, várias funções (`find_latest_csvs`, `load_previous_computed` parcial) ficam mortas
-
-### Revisão das funções de geração de arquivos finais
-
-Auditar o que `build.py` e `compute.py` produzem ao final de uma execução:
-
-- `compute.py` salva `data/<user>_<stamp>_computed.json` em `data/` raiz, depois `build.py` move para `data/<user>/<stamp>_<perspective>_report/`. Confirmar que essa cerimônia ainda faz sentido vs salvar direto na pasta final.
-- Quando rodamos `report-myself` e `report-enemy` em sequência, o build do myself move o computed.json e o enemy precisa que seja copiado de volta. Friction conhecido.
-- `analyses` table no SQLite armazena `computed_json` completo como TEXT — pode duplicar com o arquivo. Decidir fonte canônica.
-- Política de retenção: hoje todos os snapshots PDF + sections JSON ficam, sem limite. Considerar limpeza automática de snapshots antigos do mesmo user (manter os últimos N).
+Pendências menores remanescentes (limpeza CSV, dead code e revisão da geração de arquivos foram executados em `13ce2e1`).
 
 ### Outros itens menores
 
 - Reduzir verbosidade do log do servidor: hoje cada GET /api/* aparece em stderr, polui terminal em sessões longas.
 - Adicionar PRAGMA `journal_mode=WAL` em `open_db` para tolerar concorrência futura (compute.py + browser ao mesmo tempo).
 - Documentar formato dos fingerprints B/C tático em `theory.md` (hoje só em `build_tactical_index.py` docstring).
-- Endpoint `/api/analyses/dedup-map` enxuto criado mas não usado pelo browser (que prefere o `/api/analyses?game_ids=...` filtrado completo). Avaliar se vale manter os dois ou remover dedup-map.
+- Política de retenção em `data-reports/legacy-pre-recalibracao/`: 7 PDFs gerados antes da recalibração de Score. Decidir se vale regerar (custo: 0min se DB tem dados) ou descartar.
