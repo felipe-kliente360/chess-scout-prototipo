@@ -113,3 +113,54 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 - **Coverage de testes**: helpers cobertos, mas pipeline end-to-end (compute → JSON) não tem teste de integração com fixture CSV pequeno.
 - **Sem CI**: testes rodam só local. Adicionar GitHub Actions com pytest seria o mínimo.
 - **Drift entre `theory.md` e SKILL.md**: documentação de redação dispersa em 3 lugares (theory.md compartilhado + SKILL.md de cada perspectiva). Considerar consolidar.
+
+---
+
+## 📌 Backlog anotado em 2026-04-29
+
+Itens identificados durante o ciclo de melhorias mas não executados. Trazer próximo ciclo.
+
+### Recalibração do Score 0–10 (alta prioridade)
+
+Inconsistência identificada com miguelrov: rating 1424, win-rate 68%, ACPL 80, mas Score atual 2.2. A fórmula `expected_acpl(rating) = 130 * exp(-rating/1200)` foi calibrada para torneio clássico — gera expectativa irrealista para chess.com online onde 1400 joga ACPL ~80 normalmente. Três caminhos discutidos:
+
+- **Caminho A (cirúrgico)**: recalibrar `expected_acpl` para curva chess.com empírica (1000:120, 1400:80, 1800:50, 2200:30, 2500:20). Score atual 2.2 viraria ~5.5–6.0 sem mudar mais nada.
+- **Caminho B (estrutural)**: introduzir `score_10_blend` como variante combinando 50% win-rate normalizado + 30% ACPL relativo + 20% redução de blunders. Mais coerente com as outras métricas, requer normalização de "expected win rate" pelo rating médio dos adversários.
+- **Caminho C (radical)**: eliminar Score, usar Accuracy% direta. Mais transparente, perde o "calibrado por rating".
+
+Decisão pendente: A primeiro com curva publicada (Lichess/chess.com), depois B se ainda houver incoerência. Validar nos 3 casos extremos: LucasCamilo10 (1824 com farming), miguelrov (1424 honesto), jhoumedeiros (Daily com motor).
+
+### Limpeza do método CSV legado
+
+Pipeline CSV existe hoje só como fallback quando `history.db` está vazio para o user. Considerar remoção completa:
+
+- Apagar funções `find_latest_csvs`, `load_from_db` deixa de ser flag e vira default
+- Remover `scripts/import_csv_to_db.py` após validar que não há mais CSVs históricos a importar
+- Remover modo `FILE MODE` do `index.html` (badge cinza, fluxo de download de CSV)
+- Skills `report-myself` / `report-enemy` deixam de mencionar fallback CSV
+- README perde a seção "Modo legado (CSV)"
+
+Trade-off: simplifica codebase em ~200 linhas mas obriga rodar servidor local sempre. Aceitável dado que servidor é stdlib (zero deps externas).
+
+### Limpeza de históricos e dead code
+
+- `data/<user>/*_report/` arquivados: revisar se há PDFs antigos com modelos/scores desatualizados que poluem comparação longitudinal
+- `position_cache.json` exportado para o browser: confirmar se ainda é usado dado que `game_analyses` no DB cobre o mesmo papel via API
+- `scripts/`: 6+ scripts legados (build_position_cache, export_cache, enrich_eco, filter_short_games, import_new_analysis) — auditoria de quais ainda fazem sentido
+- `compute.py`: depois da refatoração para `--from-db` e remoção do fallback CSV, várias funções (`find_latest_csvs`, `load_previous_computed` parcial) ficam mortas
+- Variáveis e helpers de score que não são mais canônicos pós-refator (depende de qual caminho da recalibração for adotado)
+
+### Revisão das funções de geração de arquivos finais
+
+Auditar o que `build.py` e `compute.py` produzem ao final de uma execução:
+
+- `compute.py` salva `data/<user>_<stamp>_computed.json` em `data/` raiz, depois `build.py` move para `data/<user>/<stamp>_<perspective>_report/`. Confirmar que essa cerimônia ainda faz sentido vs salvar direto na pasta final.
+- `analyses` table no SQLite armazena `computed_json` completo como TEXT — pode duplicar com o arquivo. Decidir fonte canônica.
+- Snapshots PDF: política de retenção. Hoje todos ficam, sem limite. Considerar limpeza automática de snapshots antigos do mesmo user (manter os últimos N).
+- Sections JSON: similar, todos ficam. Útil para reprocessar com template novo, mas cresce sem bound.
+
+### Outros itens menores
+
+- Reduzir verbosidade do log do servidor: hoje cada GET /api/* aparece em stderr, polui terminal em sessões longas.
+- Adicionar PRAGMA `journal_mode=WAL` em `open_db` para tolerar concorrência futura (compute.py + browser ao mesmo tempo).
+- Documentar formato dos fingerprints B/C tático em `theory.md` (hoje só em `build_tactical_index.py` docstring).
