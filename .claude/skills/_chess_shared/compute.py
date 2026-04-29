@@ -144,21 +144,47 @@ def depth_factor(depth: int | None) -> float:
     return 1.0
 
 
+def engine_suspicion_factor(ratio_acpl_to_expected: float | None,
+                            n_user_moves: int | None) -> float:
+    """Fator multiplicativo (0.5–1.0) aplicado ao Score quando ACPL é
+    implausivelmente baixo para o rating do jogador (sinal de motor).
+
+    Definição: humanos jogam ACPL próximo do esperado pra seu rating. Quando
+    o ratio (ACPL_d20_eq / expected_acpl) cai muito abaixo de 0.5, o jogador
+    está jogando bem demais — provável uso de motor. Score é descontado
+    proporcionalmente até o piso 0.5.
+
+      ratio ≥ 0.5  → fator 1.0  (sem penalidade)
+      ratio = 0.3  → fator 0.8
+      ratio = 0.1  → fator 0.6
+      ratio ≤ 0.0  → fator 0.5  (piso)
+
+    Só aplica em amostra ≥100 lances (evita falso positivo em partidas curtas
+    onde 1 ou 2 lances perfeitos abaixam o ACPL artificialmente).
+    """
+    if (ratio_acpl_to_expected is None or n_user_moves is None
+            or n_user_moves < 100):
+        return 1.0
+    if ratio_acpl_to_expected >= 0.5:
+        return 1.0
+    return max(0.5, 0.5 + float(ratio_acpl_to_expected))
+
+
 def compute_score10(acpl, depth=None, rating=None,
                     win_rate=None, blunders=None, n_user_moves=None):
-    """Score 0-10 — blend ponderado de 3 componentes.
+    """Score 0-10 — blend ponderado de 3 componentes + penalidade de motor.
 
     50% — ACPL relativo: ACPL_d20_eq / expected_acpl(rating). Curva chess.com
-          empírica (não a teórica antiga que subestimava). Score do componente:
-          exp(-ratio/2). 1.0 = perfeito; 0.6 = jogou como esperado.
-    30% — Win-rate: win_rate / 100. 1.0 = ganhou tudo; 0.5 = empatou histórico;
-          0.0 = perdeu tudo.
-    20% — Redução de blunders: 1 / (1 + bpm/5), onde bpm = blunders por 100
-          lances do usuário. 0 blunders = 1.0; 5 bpm = 0.5; 10 bpm = 0.33.
+          empírica. Score do componente: exp(-ratio/2). 1.0 = perfeito.
+    30% — Win-rate: win_rate / 100. 1.0 = ganhou tudo.
+    20% — Redução de blunders: 1 / (1 + bpm/5).
+
+    Penalidade de motor (engine_suspicion_factor): aplicada multiplicativamente
+    ao blend quando ratio < 0.5 e n_user_moves ≥ 100. ACPL absurdamente baixo
+    para o rating do jogador é descontado até 50% do Score.
 
     Compatibilidade: chamadas legadas que passam só (acpl, depth, rating)
-    recebem só o componente ACPL × 10 (sem blend), mantendo semântica antiga
-    para subsets onde win_rate não faz sentido (by_phase).
+    recebem só o componente ACPL × 10 com a penalty já aplicada.
     """
     import math
     if acpl is None or acpl < 0:
@@ -171,9 +197,12 @@ def compute_score10(acpl, depth=None, rating=None,
     ratio = acpl_eq / expected if expected > 0 else 0
     acpl_score = math.exp(-ratio / 2)
 
+    # Penalidade de motor (aplicada ao Score final)
+    engine_factor = engine_suspicion_factor(ratio, n_user_moves)
+
     # Sem win_rate disponível: retorna só componente A (compatibilidade)
     if win_rate is None:
-        return round(10 * acpl_score, 1)
+        return round(10 * acpl_score * engine_factor, 1)
 
     # Componente win-rate
     win_score = max(0.0, min(1.0, float(win_rate) / 100.0))
@@ -186,7 +215,7 @@ def compute_score10(acpl, depth=None, rating=None,
         blunder_score = 0.5  # neutro
 
     blend = 0.5 * acpl_score + 0.3 * win_score + 0.2 * blunder_score
-    return round(10 * blend, 1)
+    return round(10 * blend * engine_factor, 1)
 
 
 def competitive_window(rating: int | float | None) -> int:
