@@ -18,10 +18,7 @@ __pycache__/
 data/*/
 data/*.csv
 data/*.json
-data/history.db
-data/history.db-wal
-data/history.db-shm
-data/history.db.backup-*
+data/db/
 
 # Relatórios PDF (PII) — ficam só local
 data-reports/

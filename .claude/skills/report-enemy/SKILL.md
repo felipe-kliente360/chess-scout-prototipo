@@ -1,6 +1,6 @@
 ---
 name: report-enemy
-description: Gera um dossiê PDF (PT-BR) com a perspectiva "este é meu adversário, me ajude a vencê-lo". Lê dados de `data/history.db`. Identifica fortalezas a evitar e fragilidades a explorar, mapeia repertório (aberturas frequentes + onde ele perde) e propõe plano de combate concreto. Uso: invoque com o username como argumento.
+description: Gera um dossiê PDF (PT-BR) com a perspectiva "este é meu adversário, me ajude a vencê-lo". Lê dados de `data/db/history.db`. Identifica fortalezas a evitar e fragilidades a explorar, mapeia repertório (aberturas frequentes + onde ele perde) e propõe plano de combate concreto. Uso: invoque com o username como argumento.
 ---
 
 # Skill: report-enemy
@@ -39,14 +39,14 @@ Diretrizes específicas para perspectiva "enemy":
 
 ### 1. Validar entrada
 - `<username>` obrigatório. Se faltar, perguntar.
-- `data/history.db` precisa ter partidas + análises do user. Se vazio, pedir para o usuário rodar `/app-start` e fazer coleta + análise via UI.
+- `data/db/history.db` precisa ter partidas + análises do user. Se vazio, pedir para o usuário rodar `/app-start` e fazer coleta + análise via UI.
 
 ### 2. Computar métricas
 ```bash
 /opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/compute.py <username>
 ```
 
-Lê `data/history.db` (única fonte). Se já houver `_computed.json` recente do mesmo ciclo (gerado por `report-myself`), reusa em vez de recomputar.
+Lê `data/db/history.db` (única fonte). Se já houver `_computed.json` recente do mesmo ciclo (gerado por `report-myself`), reusa em vez de recomputar.
 
 ### 3. Redigir as 10 seções
 

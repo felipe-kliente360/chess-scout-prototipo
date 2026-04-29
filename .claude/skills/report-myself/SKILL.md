@@ -1,6 +1,6 @@
 ---
 name: report-myself
-description: Gera um relatório PDF (PT-BR) com a perspectiva "este jogador sou eu" — diagnóstico próprio + plano de estudo. Lê dados de `data/history.db`. Calcula KPIs (Score 0–10, confiança estatística, repertório ECO), identifica fortalezas/fragilidades e prescreve estudo priorizado para os próximos 30 dias. Uso: invoque com o username como argumento.
+description: Gera um relatório PDF (PT-BR) com a perspectiva "este jogador sou eu" — diagnóstico próprio + plano de estudo. Lê dados de `data/db/history.db`. Calcula KPIs (Score 0–10, confiança estatística, repertório ECO), identifica fortalezas/fragilidades e prescreve estudo priorizado para os próximos 30 dias. Uso: invoque com o username como argumento.
 ---
 
 # Skill: report-myself
@@ -45,10 +45,10 @@ Diretrizes de estilo:
 
 ### 1. Validar entrada
 - Argumento: `<username>`. Se faltar, perguntar.
-- **Pré-requisito**: `data/history.db` precisa ter partidas + análises do user. Cheque rapidamente:
+- **Pré-requisito**: `data/db/history.db` precisa ter partidas + análises do user. Cheque rapidamente:
   ```bash
   curl -s "http://127.0.0.1:8000/api/summary?username=<username>" 2>/dev/null \
-    || /opt/homebrew/bin/python3.12 -c "import sqlite3; c=sqlite3.connect('data/history.db'); print(c.execute('SELECT COUNT(*) FROM games WHERE username=?', ('<username>',)).fetchone()[0])"
+    || /opt/homebrew/bin/python3.12 -c "import sqlite3; c=sqlite3.connect('data/db/history.db'); print(c.execute('SELECT COUNT(*) FROM games WHERE username=?', ('<username>',)).fetchone()[0])"
   ```
 - Se 0 partidas no DB: pedir ao usuário para iniciar o app (`/app-start` ou `bash scripts/start.sh`), abrir http://127.0.0.1:8000/ e rodar coleta + análise.
 
@@ -57,7 +57,7 @@ Diretrizes de estilo:
 /opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/compute.py <username>
 ```
 
-Lê `data/history.db` (única fonte). Gera `data/<username>_<timestamp>_computed.json` com: Score 10 em todos os agregados (geral, competitivo, ponderado, média por modalidade, faixa de incerteza por depth), `confidence_pct`, `openings_by_family`, `openings_weak_spots`, `eco_stats`, `tactical_themes_top`, `tactical_themes_by_phase`, partidas paradigmáticas com FENs e temas táticos por key_position.
+Lê `data/db/history.db` (única fonte). Gera `data/<username>_<timestamp>_computed.json` com: Score 10 em todos os agregados (geral, competitivo, ponderado, média por modalidade, faixa de incerteza por depth), `confidence_pct`, `openings_by_family`, `openings_weak_spots`, `eco_stats`, `tactical_themes_top`, `tactical_themes_by_phase`, partidas paradigmáticas com FENs e temas táticos por key_position.
 
 > **macOS:** use Python do Homebrew (`/opt/homebrew/bin/python3.12`). O Python do sistema não carrega Pango/GObject por SIP. Se faltar: `brew install python@3.12 pango && python3.12 -m pip install --break-system-packages pandas jinja2 chess weasyprint`.
 

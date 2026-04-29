@@ -465,7 +465,7 @@ def load_from_db(username: str) -> tuple[pd.DataFrame, pd.DataFrame, int | None,
     Retorna games_df + an_df nas colunas que o pipeline analítico espera."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import history  # type: ignore
-    db_path = DATA_DIR / "history.db"
+    db_path = DATA_DIR / "db" / "history.db"
     if not db_path.exists():
         raise SystemExit(f"❌ history.db não encontrado em {db_path} — rode scripts/serve.py primeiro.")
     conn = history.open_db(db_path)
@@ -1421,7 +1421,7 @@ def main():
     # Persistência longitudinal (SQLite) + cache de position_facts.
     try:
         from history import open_db, record_analysis, update_position_facts_batch
-        conn = open_db(DATA_DIR / "history.db")
+        conn = open_db(DATA_DIR / "db" / "history.db")
         record_analysis(conn, payload, perspective=None)
         # Cache de position_facts: para cada lance flagrado cujo facts foi
         # computado in-flight, grava o JSON na coluna position_facts. Próxima

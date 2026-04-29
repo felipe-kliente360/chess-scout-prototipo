@@ -103,7 +103,7 @@ Memórias e contexto antigo podem estar desatualizados. Antes de afirmar "X exis
 
 ### Pipeline canônico (não suportamos mais o legado)
 
-1. **Pipeline 100% SQLite.** `data/history.db` é a fonte única — `games`, `game_analyses`, `analyses`, `players`, `position_cache`. Browser posta no servidor; `compute.py` lê direto.
+1. **Pipeline 100% SQLite.** `data/db/history.db` é a fonte única — `games`, `game_analyses`, `analyses`, `players`, `position_cache`. Browser posta no servidor; `compute.py` lê direto.
 2. **Servidor local é obrigatório.** Browser via `file://` mostra badge vermelho e bloqueia operações com instrução pra rodar `bash scripts/start.sh` ou `/app-start`.
 3. **Output em `data-reports/`** (pasta única, sem subpasta por user). Formato: `<user>_<perspective>_<stamp>.pdf`.
 4. **Artefatos de apoio são deletados** após build. `computed.json` e `sections.json` ficam preservados em `analyses.computed_json` no SQLite — qualquer relatório pode ser regerado em ~5s.
@@ -151,7 +151,7 @@ Não há sobreposição — registram juntos. Se o redator quer "stockfish + tem
 ### Estrutura de versionamento
 
 - **Versionado no Git**: `data/openings/eco.json`, `data/openings/*.tsv`, `data/tactical/themes_index.json`. **Bases imutáveis** — fresh-clone funciona sem rebuild.
-- **Local apenas (gitignored)**: `data/history.db` (+ `-wal`/`-shm`), `data-reports/`, `.app-state.json`, `.app-logs/`, `data/openings/position_cache.json`.
+- **Local apenas (gitignored)**: `data/db/history.db` (+ `-wal`/`-shm`), `data-reports/`, `.app-state.json`, `.app-logs/`, `data/openings/position_cache.json`.
 
 ---
 

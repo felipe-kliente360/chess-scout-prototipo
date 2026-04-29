@@ -146,7 +146,7 @@ Lê `.app-state.json`, SIGTERM gracioso (1s), SIGKILL nos sobreviventes, limpa e
                  │
                  ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  data/history.db (SQLite, fonte única)                       │
+│  data/db/history.db (SQLite, fonte única)                       │
 │  ├── players (usuários conhecidos)                           │
 │  ├── games (UPSERT por URL chess.com)                        │
 │  ├── game_analyses (PK game_id+ply, +position_facts cache)   │
@@ -190,7 +190,8 @@ chess-scout-prototipo/
 ├── ROADMAP.md
 │
 ├── data/                                 # Bases canônicas + DB local
-│   ├── history.db                        # SQLite — fonte única (PII, gitignored)
+│   ├── db/                               # SQLite — fonte única (PII, gitignored)
+│   │   └── history.db (+ -wal/-shm)
 │   ├── openings/
 │   │   ├── eco.json                      # Base ECO Lichess (3.690 posições, versionado)
 │   │   ├── *.tsv                         # TSVs raw Lichess (versionado)
@@ -318,7 +319,7 @@ python3.12 -m pip install --break-system-packages pandas jinja2 chess weasyprint
 **Não precisa rodar nenhum build.** As bases canônicas (`data/openings/eco.json` com 3.690 aberturas + `data/tactical/themes_index.json` com 308k puzzles processados) já vêm versionadas no repositório. Fresh-clone já é funcional.
 
 O que é local apenas (gitignored):
-- `data/history.db` — partidas + análises do user (criado na 1ª execução)
+- `data/db/history.db` — partidas + análises do user (criado na 1ª execução)
 - `data-reports/` — relatórios PDF gerados
 - `.app-state.json` + `.app-logs/` — lifecycle do app
 
@@ -382,7 +383,7 @@ Cobertura: helpers de score (calibração, faixas, monotonicidade), classificaç
 
 Cada execução de `compute.py` grava snapshot completo em `analyses(username, stamp, computed_json)`. Permite:
 - `delta_vs_previous` automático (variação de Score, ACPL, win-rate entre ciclos)
-- Comparação cross-jogador (queries SQL diretas no `data/history.db`)
+- Comparação cross-jogador (queries SQL diretas no `data/db/history.db`)
 - Reprocessar com template novo sem refazer Stockfish (tudo está em `analyses.computed_json`)
 
 ---

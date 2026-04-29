@@ -41,7 +41,7 @@ from history import (  # type: ignore
     fetch_analyses_for_user, games_needing_analysis,
 )
 
-DB_PATH = ROOT / "data" / "history.db"
+DB_PATH = ROOT / "data" / "db" / "history.db"
 WEBROOT = ROOT  # serve index.html, tactical-themes.js, data/* relativos a aqui
 
 

@@ -159,7 +159,7 @@ def main():
     history = []
     try:
         from history import open_db, record_analysis, fetch_history
-        conn = open_db(DATA_DIR / "history.db")
+        conn = open_db(DATA_DIR / "db" / "history.db")
         record_analysis(conn, computed, perspective=perspective)
         history = fetch_history(conn, username, limit=12)
         conn.close()
