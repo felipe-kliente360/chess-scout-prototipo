@@ -28,7 +28,7 @@ DATA_DIR = ROOT / "data"
 REPORTS_DIR = ROOT / "data-reports"
 DATE_RE = re.compile(r"(\d{8}T\d{6}|\d{4}-\d{2}-\d{2})")
 
-VALID_PERSPECTIVES = {"myself", "enemy"}
+VALID_PERSPECTIVES = {"myself", "enemy", "coach"}
 
 
 def latest(directory: Path, *patterns: str):
@@ -120,9 +120,72 @@ def render_board_svg(fen: str, played_uci: str | None = None,
     return chess.svg.board(board=board, arrows=arrows, size=size, orientation=orientation)
 
 
+def compute_coach_benchmarks(conn, username, computed):
+    """Compara o aluno atual com os outros players da DB.
+    Pega o último ciclo de cada player e calcula percentil do aluno em
+    Score 10, win-rate, confidence_pct, eco_avg_ply.
+    Retorna lista de jogadores (anonimizada) + posição do aluno."""
+    rows = conn.execute("""
+      SELECT a.username, a.score_10, a.win_rate, a.confidence_pct,
+             a.n_games_relevant, a.computed_json
+      FROM analyses a
+      JOIN (
+        SELECT username, MAX(stamp) AS max_stamp FROM analyses GROUP BY username
+      ) latest ON latest.username = a.username AND latest.max_stamp = a.stamp
+    """).fetchall()
+    students = []
+    aluno = None
+    for r in rows:
+        d = dict(r)
+        try:
+            cj = json.loads(d.get("computed_json") or "{}")
+            d["eco_avg_ply"] = (cj.get("eco_stats") or {}).get("avg_eco_ply")
+        except Exception:
+            d["eco_avg_ply"] = None
+        d.pop("computed_json", None)
+        if d["username"] == username:
+            aluno = d
+        students.append(d)
+
+    if len(students) < 2 or not aluno:
+        return {"available": False, "n_students": len(students)}
+
+    def percentile(value, key):
+        if value is None: return None
+        vals = [s[key] for s in students if s.get(key) is not None]
+        if len(vals) < 2: return None
+        below = sum(1 for v in vals if v < value)
+        return round(100.0 * below / (len(vals) - 1), 1) if len(vals) > 1 else None
+
+    rank = {
+        "score_10": percentile(aluno.get("score_10"), "score_10"),
+        "win_rate": percentile(aluno.get("win_rate"), "win_rate"),
+        "confidence_pct": percentile(aluno.get("confidence_pct"), "confidence_pct"),
+        "eco_avg_ply": percentile(aluno.get("eco_avg_ply"), "eco_avg_ply"),
+    }
+    return {
+        "available": True,
+        "n_students": len(students),
+        "aluno": aluno,
+        "percentile": rank,
+        "all": [
+            {
+                "username": ("você" if s["username"] == username else f"aluno_{i+1}"),
+                "score_10": s.get("score_10"),
+                "win_rate": s.get("win_rate"),
+                "confidence_pct": s.get("confidence_pct"),
+                "eco_avg_ply": s.get("eco_avg_ply"),
+                "n_games_relevant": s.get("n_games_relevant"),
+                "is_you": s["username"] == username,
+            }
+            for i, s in enumerate(students)
+        ],
+    }
+
+
 def main():
     if len(sys.argv) < 3:
-        raise SystemExit("Uso: python build.py <username> <myself|enemy>")
+        raise SystemExit("Uso: python build.py <username> <myself|enemy|coach>")
     username = sys.argv[1].strip()
     perspective = sys.argv[2].strip().lower()
     if perspective not in VALID_PERSPECTIVES:
@@ -155,16 +218,26 @@ def main():
     sections = json.loads(sections_file.read_text(encoding="utf-8"))
     stamp = computed.get("stamp") or DATE_RE.search(computed_file.name).group(1)
 
-    # Persistência longitudinal: marca esta perspectiva e busca histórico para evolução
+    # Persistência longitudinal: marca esta perspectiva, salva cache de sections e busca histórico.
     history = []
     try:
-        from history import open_db, record_analysis, fetch_history
+        from history import (
+            open_db, record_analysis, fetch_history,
+            save_cached_sections, compute_sample_signature,
+        )
         conn = open_db(DATA_DIR / "db" / "history.db")
         record_analysis(conn, computed, perspective=perspective)
+        # Cache de sections + assinatura — permite regen rápida no próximo ciclo.
+        signature = compute_sample_signature(computed)
+        save_cached_sections(conn, username, perspective, stamp, sections, signature)
         history = fetch_history(conn, username, limit=12)
+        # Coach: injeta percentis cross-aluno comparando o último ciclo de cada
+        # player na DB. Só faz sentido com perspective=coach.
+        if perspective == "coach":
+            computed["coach_benchmarks"] = compute_coach_benchmarks(conn, username, computed)
         conn.close()
     except Exception as e:
-        print(f"⚠ histórico não consultado: {e}")
+        print(f"⚠ histórico/cache não persistido: {e}")
     computed["history"] = history
     computed["evolution_charts"] = {
         m: render_evolution_svg(history, m) for m in ("score_10", "win_rate", "confidence_pct")

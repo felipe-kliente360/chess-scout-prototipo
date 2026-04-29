@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Plano Didático — {{ c.username }}</title>
+<style>
+  :root {
+    --accent: #1d6e8e;
+    --accent-bg: #f1f8fb;
+    --accent-soft: #c5dee9;
+    --accent-text: #144d63;
+  }
+  @page { @bottom-left { content: "{{ c.username }} · plano didático · {{ stamp }}"; font-size: 8.5pt; color: #888; } }
+  {% include 'base.css' %}
+  .bench-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .bench-table th, .bench-table td { border: 1px solid #ddd; padding: 4px 8px; font-size: 9.5pt; }
+  .bench-table .you { background: var(--accent-bg); font-weight: 600; color: var(--accent-text); }
+  .bench-table th { background: #f5f5f5; }
+  .pct-bar { display:inline-block; height:8px; border-radius:3px; background:var(--accent); }
+</style>
+</head>
+<body>
+{% from 'macros.html' import sample_warning, score_legend, phases_table, colors_table, time_class_table, openings_family_table, game_card, puzzle_program_block, tactics_summary_table, head_to_head_table, references_list, evolution_block, time_analysis_block %}
+
+<div class="cover">
+  <div class="icon">🎓</div>
+  <h1>Plano Didático — {{ c.username }}</h1>
+  <div class="sub">Perspectiva treinador → aluno · ciclo {{ stamp }}</div>
+  <div class="meta">
+    {{ c.sample_quality.n_games_relevant }} partidas relevantes (de {{ c.kpis.n_games }} coletadas) ·
+    confiabilidade da amostra: {{ c.sample_quality.confidence_pct }}%
+  </div>
+</div>
+
+{{ sample_warning(c.sample_quality) }}
+{{ score_legend('do aluno') }}
+
+<div class="section">
+  <h2>1. Aluno e ciclo</h2>
+  {{ s.section_1_student | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>2. Onde acelerou — delta vs ciclo anterior</h2>
+  {{ s.section_2_progress | nl2p | safe }}
+  {% if c.history and c.history|length >= 2 %}
+  <h3>Evolução nos ciclos</h3>
+  {{ evolution_block(c.history, c.evolution_charts) }}
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2>3. Onde regrediu ou estagnou</h2>
+  {{ s.section_3_regression | nl2p | safe }}
+  {{ phases_table(c.by_phase) }}
+</div>
+
+<div class="section">
+  <h2>4. Comparativo com outros alunos</h2>
+  {{ s.section_4_benchmark | nl2p | safe }}
+  {% if c.coach_benchmarks and c.coach_benchmarks.available %}
+  <h3>Posição relativa (n = {{ c.coach_benchmarks.n_students }} alunos)</h3>
+  <table class="bench-table">
+    <thead>
+      <tr>
+        <th>Aluno</th>
+        <th class="num">Score</th>
+        <th class="num">Win-rate</th>
+        <th class="num">Confiança</th>
+        <th class="num">Lances de teoria</th>
+        <th class="num">Partidas relevantes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for st in c.coach_benchmarks.all %}
+      <tr {% if st.is_you %}class="you"{% endif %}>
+        <td>{{ st.username }}</td>
+        <td class="num">{{ st.score_10 if st.score_10 is not none else '—' }}</td>
+        <td class="num">{{ st.win_rate ~ '%' if st.win_rate is not none else '—' }}</td>
+        <td class="num">{{ st.confidence_pct ~ '%' if st.confidence_pct is not none else '—' }}</td>
+        <td class="num">{{ st.eco_avg_ply if st.eco_avg_ply is not none else '—' }}</td>
+        <td class="num">{{ st.n_games_relevant if st.n_games_relevant is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <h3>Percentil do aluno</h3>
+  <table class="bench-table">
+    <thead><tr><th>Métrica</th><th class="num">Percentil</th><th>Leitura</th></tr></thead>
+    <tbody>
+      {% set pct = c.coach_benchmarks.percentile %}
+      <tr><td>Score 10</td><td class="num">{{ pct.score_10 if pct.score_10 is not none else '—' }}</td><td>{% if pct.score_10 and pct.score_10 >= 70 %}top da turma{% elif pct.score_10 and pct.score_10 >= 40 %}meio da turma{% elif pct.score_10 is not none %}abaixo da média{% else %}—{% endif %}</td></tr>
+      <tr><td>Win-rate</td><td class="num">{{ pct.win_rate if pct.win_rate is not none else '—' }}</td><td>cruze com adversários para evitar viés de oponente fraco</td></tr>
+      <tr><td>Confiança</td><td class="num">{{ pct.confidence_pct if pct.confidence_pct is not none else '—' }}</td><td>tamanho da amostra do aluno relativo aos outros</td></tr>
+      <tr><td>Lances de teoria</td><td class="num">{{ pct.eco_avg_ply if pct.eco_avg_ply is not none else '—' }}</td><td>profundidade de repertório vs turma</td></tr>
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#777">Comparativo cross-aluno indisponível — base ainda tem {% if c.coach_benchmarks %}{{ c.coach_benchmarks.n_students }}{% else %}1{% endif %} jogador(es). Próximos ciclos com mais alunos vão habilitar percentil.</p>
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2>5. Padrão dominante atual</h2>
+  {{ s.section_5_dominant_pattern | nl2p | safe }}
+  {{ tactics_summary_table(c.kpis) }}
+</div>
+
+<div class="section">
+  <h2>6. Partidas mais educativas do ciclo</h2>
+  <p style="font-size:9.5pt;color:#777;margin-top:-2px">Critério: 2 melhores vitórias + 2 piores derrotas, mínimo 25 lances do aluno.</p>
+  <h3>Vitórias para reforçar padrão correto</h3>
+  {% for g in c.paradigmatic_games if g.result == 'Win' %}
+    {{ game_card(g, s.paradigmatic_narratives, my_pronoun='o aluno', opp_pronoun='o adversário') }}
+  {% endfor %}
+  <h3>Derrotas para corrigir padrão</h3>
+  {% for g in c.paradigmatic_games if g.result == 'Loss' %}
+    {{ game_card(g, s.paradigmatic_narratives, my_pronoun='o aluno', opp_pronoun='o adversário') }}
+  {% endfor %}
+</div>
+
+<div class="section">
+  <h2>7. Números do ciclo</h2>
+  <div class="kpi-grid">
+    <div class="kpi"><div class="v">{{ c.kpis.n_games }}</div><div class="l">Partidas</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.win_rate }}%</div><div class="l">Win-rate</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.score_10 }}/10</div><div class="l">Score geral</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.blunders }}</div><div class="l">Erros graves</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.mistakes }}</div><div class="l">Erros médios</div></div>
+    {% if c.eco_stats and c.eco_stats.avg_eco_ply %}
+    <div class="kpi"><div class="v">{{ c.eco_stats.avg_eco_ply }}</div><div class="l">Lances de teoria</div></div>
+    {% endif %}
+  </div>
+  <h3>Por cor</h3>
+  {{ colors_table(c.by_color) }}
+  {% if c.by_time_class and c.by_time_class|length > 1 %}
+  <h3>Por ritmo de jogo</h3>
+  {{ time_class_table(c.by_time_class) }}
+  {% endif %}
+  {% if c.openings_by_family %}
+  <h3>Repertório do aluno</h3>
+  {{ openings_family_table(c.openings_by_family) }}
+  {% endif %}
+  <h3>Adversários mais frequentes</h3>
+  {{ head_to_head_table(c.head_to_head) }}
+</div>
+
+<div class="section">
+  <h2>8. Diagnóstico de tempo</h2>
+  {{ s.section_time_management | nl2p | safe }}
+  {{ time_analysis_block(c.time_analysis, my_pronoun='o aluno') }}
+</div>
+
+<div class="section">
+  <h2>9. Plano didático — próximas 4 semanas</h2>
+  {{ s.section_9_lesson_plan | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>10. Sinais para próxima aula</h2>
+  {{ s.section_10_next_session | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>11. Programa de puzzles atribuído</h2>
+  {{ puzzle_program_block(c.puzzle_program, s.section_puzzle_program) }}
+</div>
+
+<div class="section">
+  <h2>12. Partidas-chave (5 melhores vitórias + 5 piores derrotas)</h2>
+  {{ references_list(c.references) }}
+</div>
+
+</body>
+</html>

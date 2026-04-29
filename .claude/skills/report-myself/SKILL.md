@@ -61,6 +61,26 @@ Lê `data/db/history.db` (única fonte). Gera `data/<username>_<timestamp>_compu
 
 > **macOS:** use Python do Homebrew (`/opt/homebrew/bin/python3.12`). O Python do sistema não carrega Pango/GObject por SIP. Se faltar: `brew install python@3.12 pango && python3.12 -m pip install --break-system-packages pandas jinja2 chess weasyprint`.
 
+### 2b. Consultar cache de sections (regen rápida + economia de tokens)
+
+**Sempre rode antes de redigir.** O `build.py` salva o último `sections.json` por `(username, perspective)` no SQLite com assinatura da amostra. Em pedidos subsequentes, reuse o que não mudou:
+
+```bash
+/opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/cache_lookup.py <username> myself
+```
+
+Saída JSON traz:
+- `cached`: bool — se há cache prévio.
+- `sections`: dict com seções cacheadas (`section_1_intro`, etc).
+- `delta_flags`: por seção, `"reuse"` ou `"regenerate"` baseado em delta de assinatura (n_games, score_10, fases, top openings, top tactical, paradigmáticas, time_median).
+- `reuse_recommendation`:
+  - `"no_cache"` — cache vazio; redija tudo do zero.
+  - `"full_reuse"` — nada mudou; copie literal e siga pro build.
+  - `"partial_regen"` — regenere só as seções marcadas `"regenerate"`, copie as outras.
+  - `"regenerate_all"` — mudança grande; redija tudo.
+
+Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cacheadas + regeneradas). Salvar o arquivo no formato esperado por build.py: `data/<username>_<stamp>_myself_sections.json`. Economia de tokens: ~10× menos quando muda pouco.
+
 ### 3. Redigir as 11 seções
 
 | # | Título no PDF | Chave JSON |
