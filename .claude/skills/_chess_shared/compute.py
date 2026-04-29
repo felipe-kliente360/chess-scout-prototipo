@@ -491,17 +491,17 @@ def main():
     def _clean_str(v):
         return "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v).strip()
 
-    games_df["_opening_key"] = games_df["opening"].map(lambda v: _clean_str(v) or "Sem ECO")
     if "eco_family" in games_df.columns:
         games_df["_family_key"] = games_df.apply(
             lambda r: _clean_str(r.get("eco_family"))
                       or _clean_str(r.get("opening")).split(":")[0].strip()
                       or "Sem ECO", axis=1)
     else:
-        games_df["_family_key"] = games_df["_opening_key"].map(lambda s: s.split(":")[0].strip() or "Sem ECO")
+        games_df["_family_key"] = games_df["opening"].map(
+            lambda v: (_clean_str(v) or "Sem ECO").split(":")[0].strip() or "Sem ECO")
 
     user_moves_keyed = user_moves.merge(
-        games_df[["index", "_opening_key", "_family_key"]],
+        games_df[["index", "_family_key"]],
         left_on="game_index", right_on="index", how="left",
     )
 
@@ -530,10 +530,8 @@ def main():
             }
         return out
 
-    opening_stats = _agg_by("_opening_key")
     family_stats = _agg_by("_family_key")
 
-    openings_top = sorted(opening_stats.values(), key=lambda x: -x["n"])[:10]
     openings_by_family = sorted(family_stats.values(), key=lambda x: -x["n"])[:10]
     openings_weak_spots = sorted(
         [v for v in family_stats.values() if v["n"] >= 5 and v["win_rate"] < 40.0],
@@ -805,7 +803,6 @@ def main():
         "by_phase": by_phase,
         "by_color": by_color,
         "by_time_class": by_time_class,
-        "openings_top": openings_top,
         "openings_by_family": openings_by_family,
         "openings_weak_spots": openings_weak_spots,
         "eco_stats": {
