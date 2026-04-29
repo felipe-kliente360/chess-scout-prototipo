@@ -39,6 +39,7 @@ from history import (  # type: ignore
     open_db, list_players, analysis_summary, fetch_games,
     upsert_games_batch, existing_game_ids, save_analysis_batch,
     fetch_analyses_for_user, games_needing_analysis,
+    start_execution_log, end_execution_log, execution_calibration,
 )
 
 DB_PATH = ROOT / "data" / "db" / "history.db"
@@ -166,6 +167,10 @@ class Handler(BaseHTTPRequestHandler):
                 game_ids = parse_csv_param(qs, "game_ids") or None
                 return _json(self, fetch_analyses_for_user(conn, u, min_depth, game_ids))
 
+            if path == "/api/execution-logs/calibration":
+                eng = (qs.get("engine", [""])[0] or "").strip() or None
+                return _json(self, execution_calibration(conn, engine=eng))
+
             return _bad(self, f"endpoint não encontrado: {path}", status=404)
         finally:
             conn.close()
@@ -187,6 +192,17 @@ class Handler(BaseHTTPRequestHandler):
                     return _bad(self, "rows deve ser lista")
                 n = save_analysis_batch(conn, rows)
                 return _json(self, {"saved": n})
+
+            if path == "/api/execution-logs/start":
+                exec_id = start_execution_log(conn, payload)
+                return _json(self, {"id": exec_id})
+
+            if path == "/api/execution-logs/end":
+                exec_id = payload.get("id")
+                if not exec_id:
+                    return _bad(self, "id obrigatório")
+                ok = end_execution_log(conn, int(exec_id), payload)
+                return _json(self, {"ok": ok})
 
             return _bad(self, f"endpoint não encontrado: {path}", status=404)
         finally:

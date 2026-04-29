@@ -108,6 +108,44 @@ CREATE TABLE IF NOT EXISTS game_analyses (
 CREATE INDEX IF NOT EXISTS idx_ga_game ON game_analyses(game_id);
 -- Acelera games_needing_analysis e dedup-map (MIN/MAX(depth) por game_id):
 CREATE INDEX IF NOT EXISTS idx_ga_game_depth ON game_analyses(game_id, depth);
+
+-- ── Telemetria de execução ────────────────────────────────────────────────
+-- Browser registra em /api/execution-logs/start ao iniciar uma análise e
+-- atualiza em /api/execution-logs/end ao concluir. Permite recalibrar
+-- estimateSecondsPerPosition no index.html após acúmulo de execuções.
+CREATE TABLE IF NOT EXISTS execution_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  duration_seconds REAL,
+  depth INTEGER NOT NULL,
+  engine TEXT NOT NULL,
+  n_games INTEGER,
+  n_positions_total INTEGER,
+  n_positions_analyzed INTEGER,
+  n_db_hits INTEGER,
+  n_cache_hits INTEGER,
+  n_cache_misses INTEGER,
+  n_failures INTEGER,
+  expected_seconds_at_start REAL,
+  status TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_exec_engine_depth ON execution_logs(engine, depth);
+
+-- ── Cache de sections (regen rápida + economia de tokens) ─────────────────
+-- Salva o último sections.json + assinatura da amostra por (user, perspective).
+-- Em pedidos subsequentes, skill compara a assinatura e decide reusar tudo
+-- ou só os trechos que mudaram.
+CREATE TABLE IF NOT EXISTS sections_cache (
+  username TEXT NOT NULL,
+  perspective TEXT NOT NULL,
+  stamp TEXT NOT NULL,
+  sections_json TEXT NOT NULL,
+  signature_json TEXT NOT NULL,
+  generated_at TEXT NOT NULL,
+  PRIMARY KEY (username, perspective)
+);
 """
 
 
@@ -556,6 +594,266 @@ def backfill_clocks_for_user(conn: sqlite3.Connection, username: str) -> dict:
         (username,),
     ).fetchone()["n"]
     return stats
+
+
+def start_execution_log(conn: sqlite3.Connection, payload: dict) -> int:
+    """Cria registro 'running' no início de uma análise. Retorna id."""
+    started = datetime.now().isoformat(timespec="seconds")
+    cur = conn.execute("""
+      INSERT INTO execution_logs (
+        username, started_at, depth, engine, n_games,
+        n_positions_total, expected_seconds_at_start, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running')
+    """, (
+        payload.get("username") or "",
+        started,
+        int(payload.get("depth") or 0),
+        str(payload.get("engine") or "local"),
+        _safe(payload.get("n_games")),
+        _safe(payload.get("n_positions_total")),
+        _safe(payload.get("expected_seconds_at_start")),
+    ))
+    conn.commit()
+    return cur.lastrowid
+
+
+def end_execution_log(conn: sqlite3.Connection, exec_id: int, payload: dict) -> bool:
+    """Marca execução como completed/errored. Idempotente."""
+    ended = datetime.now().isoformat(timespec="seconds")
+    cur = conn.execute("""
+      UPDATE execution_logs SET
+        ended_at = ?,
+        duration_seconds = ?,
+        n_positions_analyzed = ?,
+        n_db_hits = ?,
+        n_cache_hits = ?,
+        n_cache_misses = ?,
+        n_failures = ?,
+        status = ?
+      WHERE id = ?
+    """, (
+        ended,
+        _safe(payload.get("duration_seconds")),
+        _safe(payload.get("n_positions_analyzed")),
+        _safe(payload.get("n_db_hits")),
+        _safe(payload.get("n_cache_hits")),
+        _safe(payload.get("n_cache_misses")),
+        _safe(payload.get("n_failures")),
+        str(payload.get("status") or "completed"),
+        int(exec_id),
+    ))
+    conn.commit()
+    return (cur.rowcount or 0) > 0
+
+
+def execution_calibration(conn: sqlite3.Connection, engine: str | None = None,
+                          min_samples: int = 3) -> dict:
+    """Retorna sec/posição observado por (engine, depth) com base em execuções
+    completadas com n_positions_analyzed >= 30 (corta ruído de execuções curtas).
+    Usado pelo browser para recalibrar estimateSecondsPerPosition.
+
+    Estrutura retornada:
+      {"by_engine_depth": {"local|15": {"n": 4, "sec_per_pos": 1.12, "ratio_vs_expected": 1.4}, ...},
+       "n_total": int, "min_samples": int}
+    """
+    sql = """
+      SELECT engine, depth, duration_seconds, n_positions_analyzed,
+             expected_seconds_at_start, n_positions_total, n_db_hits, n_cache_hits
+      FROM execution_logs
+      WHERE status = 'completed'
+        AND duration_seconds IS NOT NULL
+        AND n_positions_analyzed IS NOT NULL
+        AND n_positions_analyzed >= 30
+    """
+    args: list = []
+    if engine:
+        sql += " AND engine = ?"
+        args.append(engine)
+    rows = conn.execute(sql, args).fetchall()
+    bucket: dict[str, list[dict]] = {}
+    for r in rows:
+        key = f"{r['engine']}|{int(r['depth'])}"
+        bucket.setdefault(key, []).append(dict(r))
+    out: dict[str, dict] = {}
+    for key, items in bucket.items():
+        if len(items) < min_samples:
+            continue
+        sec_per_pos = [it["duration_seconds"] / it["n_positions_analyzed"] for it in items]
+        sec_per_pos.sort()
+        median = sec_per_pos[len(sec_per_pos) // 2]
+        # ratio observado vs estimado (para diagnóstico)
+        ratios = []
+        for it in items:
+            exp = it.get("expected_seconds_at_start")
+            if exp and exp > 0:
+                ratios.append(it["duration_seconds"] / exp)
+        ratio_median = sorted(ratios)[len(ratios) // 2] if ratios else None
+        out[key] = {
+            "n": len(items),
+            "sec_per_pos_median": round(median, 3),
+            "ratio_vs_expected_median": round(ratio_median, 3) if ratio_median else None,
+        }
+    return {
+        "by_engine_depth": out,
+        "n_total": len(rows),
+        "min_samples": min_samples,
+    }
+
+
+# ── Sections cache (regen rápida + economia de tokens) ───────────────────
+
+def get_cached_sections(conn: sqlite3.Connection, username: str,
+                        perspective: str) -> dict | None:
+    cur = conn.execute("""
+      SELECT username, perspective, stamp, sections_json, signature_json, generated_at
+      FROM sections_cache WHERE username = ? AND perspective = ?
+    """, (username, perspective))
+    row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def save_cached_sections(conn: sqlite3.Connection, username: str, perspective: str,
+                         stamp: str, sections: dict, signature: dict) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    conn.execute("""
+      INSERT INTO sections_cache (username, perspective, stamp, sections_json, signature_json, generated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(username, perspective) DO UPDATE SET
+        stamp = excluded.stamp,
+        sections_json = excluded.sections_json,
+        signature_json = excluded.signature_json,
+        generated_at = excluded.generated_at
+    """, (
+        username, perspective, stamp,
+        json.dumps(sections, ensure_ascii=False),
+        json.dumps(signature, ensure_ascii=False),
+        now,
+    ))
+    conn.commit()
+
+
+def compute_sample_signature(computed: dict) -> dict:
+    """Assinatura compacta da amostra usada como chave de invalidação do cache.
+    Mudanças nesses campos justificam re-redação. Heurística por seção:
+      - n_games / win_rate / score_10 → afeta seção 1, 2, 8, 11
+      - top opening + ECO coverage → seção 5
+      - tactical_themes_top top-3 → seção 4
+      - paradigmatic_games (ids) → seção 7
+      - score por fase → seção 2, 6
+      - time_analysis median + bucket pico → seção 9
+    """
+    sq = computed.get("sample_quality") or {}
+    k = computed.get("kpis") or {}
+    bp = computed.get("by_phase") or {}
+    bc = computed.get("by_color") or {}
+    btc = computed.get("by_time_class") or {}
+    eco = computed.get("eco_stats") or {}
+    obf = computed.get("openings_by_family") or []
+    tt = k.get("tactical_themes_top") or []
+    pg = computed.get("paradigmatic_games") or []
+    ta = computed.get("time_analysis") or {}
+    return {
+        "n_games": sq.get("n_games_collected"),
+        "n_relevant": sq.get("n_games_relevant"),
+        "confidence_pct": sq.get("confidence_pct"),
+        "win_rate": k.get("win_rate"),
+        "score_10": k.get("score_10"),
+        "score_basis": k.get("score_10_basis"),
+        "blunders": k.get("blunders"),
+        "by_phase_score": {p: (bp.get(p) or {}).get("score_10") for p in ("abertura", "meio-jogo", "final")},
+        "by_color_score": {c: (bc.get(c) or {}).get("score_10") for c in ("White", "Black")},
+        "modalities": sorted(list(btc.keys())),
+        "eco_coverage_pct": eco.get("coverage_pct"),
+        "eco_avg_ply": eco.get("avg_eco_ply"),
+        "top_openings": [o.get("name") for o in obf[:5]],
+        "tactical_top3": [[t.get("theme"), t.get("n")] for t in tt[:3]],
+        "paradigmatic_ids": [g.get("url") or g.get("game_index") for g in pg],
+        "time_median_s": (ta.get("summary") or {}).get("median_time_s"),
+    }
+
+
+def signature_delta_flags(prev: dict, curr: dict) -> dict:
+    """Compara duas assinaturas e devolve flags por seção do report.
+    Cada flag ∈ {"reuse", "regenerate"}. Heurística simples:
+      - n_games delta >20% → regenera tudo
+      - score_10 delta >0.5 → regenera 1, 2, 6, 11
+      - by_phase_score delta >0.3 numa fase → regenera 2 e 6
+      - top_openings mudou → regenera 5
+      - tactical_top3 mudou tema #1 → regenera 4
+      - paradigmatic_ids mudou → regenera 7
+      - time_median_s delta >20% → regenera 9
+    """
+    def fnum(x):
+        try: return float(x)
+        except (TypeError, ValueError): return None
+    def changed(a, b, abs_tol=0.0, rel_tol=0.0):
+        fa, fb = fnum(a), fnum(b)
+        if fa is None and fb is None: return False
+        if fa is None or fb is None: return True
+        if abs_tol and abs(fa - fb) > abs_tol: return True
+        if rel_tol and fa != 0 and abs(fa - fb) / max(abs(fa), 0.01) > rel_tol: return True
+        return False
+
+    out = {
+        "section_1_intro": "reuse",
+        "section_2_phases": "reuse",
+        "section_3_colors": "reuse",
+        "section_4_tactics": "reuse",
+        "section_5_openings": "reuse",
+        "section_6_endgames": "reuse",
+        "paradigmatic_narratives": "reuse",
+        "section_time_management": "reuse",
+        "section_9_strengths": "reuse",
+        "section_10_opponents": "reuse",
+        "section_11_plan": "reuse",
+        "section_puzzle_program": "reuse",
+        # variantes enemy
+        "section_1_profile": "reuse",
+        "section_2_strengths": "reuse",
+        "section_3_weaknesses": "reuse",
+        "section_4_repertoire": "reuse",
+        "section_5_colors": "reuse",
+        "section_6_losing_patterns": "reuse",
+        "section_9_battleplan": "reuse",
+        "section_10_traps": "reuse",
+    }
+
+    full_regen = changed(prev.get("n_games"), curr.get("n_games"), rel_tol=0.20)
+    if full_regen:
+        return {k: "regenerate" for k in out}
+
+    if changed(prev.get("score_10"), curr.get("score_10"), abs_tol=0.5):
+        for k in ("section_1_intro", "section_2_phases", "section_6_endgames",
+                  "section_11_plan", "section_9_strengths",
+                  "section_1_profile", "section_2_strengths", "section_3_weaknesses",
+                  "section_9_battleplan"):
+            out[k] = "regenerate"
+
+    prev_phase = prev.get("by_phase_score") or {}
+    curr_phase = curr.get("by_phase_score") or {}
+    for ph in ("abertura", "meio-jogo", "final"):
+        if changed(prev_phase.get(ph), curr_phase.get(ph), abs_tol=0.3):
+            out["section_2_phases"] = "regenerate"
+            out["section_6_endgames"] = "regenerate"
+            break
+
+    if (prev.get("top_openings") or [])[:3] != (curr.get("top_openings") or [])[:3]:
+        out["section_5_openings"] = "regenerate"
+        out["section_4_repertoire"] = "regenerate"
+
+    p_top = (prev.get("tactical_top3") or [None])[0]
+    c_top = (curr.get("tactical_top3") or [None])[0]
+    if p_top != c_top:
+        out["section_4_tactics"] = "regenerate"
+
+    if (prev.get("paradigmatic_ids") or []) != (curr.get("paradigmatic_ids") or []):
+        out["paradigmatic_narratives"] = "regenerate"
+        out["section_6_losing_patterns"] = "regenerate"
+
+    if changed(prev.get("time_median_s"), curr.get("time_median_s"), rel_tol=0.20):
+        out["section_time_management"] = "regenerate"
+
+    return out
 
 
 def analysis_summary(conn: sqlite3.Connection, username: str) -> dict:

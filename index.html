@@ -317,10 +317,37 @@
     document.getElementById("subtitle").textContent = `${USERNAME} · ${TARGET} partidas · depth ${STOCKFISH_DEPTH} · ${selectedTC.join("+")} · ${ENGINE}`;
   }
 
+  // Calibração observada (preenchida sob demanda via /api/execution-logs/calibration).
+  // Estrutura: {"local|15": {n, sec_per_pos_median, ...}, "api|18": {...}}.
+  let CALIBRATION = null;
+  let CALIBRATION_LOADED_AT = 0;
+
+  async function loadCalibration() {
+    // TTL 60s — recarrega se ficou velho. Falha silenciosa se servidor offline.
+    if (CALIBRATION && (Date.now() - CALIBRATION_LOADED_AT) < 60_000) return CALIBRATION;
+    if (!SERVER_MODE) return null;
+    try {
+      const data = await api("/api/execution-logs/calibration");
+      CALIBRATION = data || {};
+      CALIBRATION_LOADED_AT = Date.now();
+    } catch (_) {
+      CALIBRATION = null;
+    }
+    return CALIBRATION;
+  }
+
   // Empírico em Mac M-series com stockfish.js single-thread:
   // d10≈0.10s/pos · d12≈0.20s · d15≈0.80s · d18≈3.0s · d20≈8.0s · d22≈25s
   // Modelo: overhead fixo (handshake isready + msg passing) + tempo do engine ~ branching^d
+  // Se houver calibração observada (≥3 execuções no DB), prefere o sec/pos mediano real.
   function estimateSecondsPerPosition(depth, engine) {
+    const cal = (CALIBRATION && CALIBRATION.by_engine_depth) || null;
+    if (cal) {
+      const exact = cal[`${engine}|${depth}`];
+      if (exact && exact.n >= 3 && exact.sec_per_pos_median > 0) {
+        return exact.sec_per_pos_median;
+      }
+    }
     if (engine === "local") {
       const overhead = 0.18;  // isready/readyok + postMessage round-trip
       const engineSec = 0.05 * Math.pow(1.7, Math.max(0, depth - 10));
@@ -583,6 +610,8 @@
       log(`📚 Aberturas classificadas via ECO: ${ecoHits}/${allGames.length} (${pct}%).`);
       // Pré-carrega o cache para que a estimativa já reflita hit-rate
       await loadPositionCache();
+      // Calibração observada para ajustar estimateSecondsPerPosition.
+      await loadCalibration();
       // Server mode: persiste partidas no SQLite local. Idempotente — re-rodar
       // não duplica, só atualiza fetched_at + campos de eco (caso melhorem).
       if (SERVER_MODE) {
@@ -1109,7 +1138,23 @@
 
     let analyzedPositions = 0;
     let apiErrors = 0;
+    let dbHits = 0;
     apiDiagnostics = { calls: [], ok: 0, failed: 0, byKind: {}, latencies: [], startedAt: Date.now() };
+
+    // Telemetria de execução: registra início no DB para recalibrar o estimador.
+    let execLogId = null;
+    const execStartedAt = Date.now();
+    if (SERVER_MODE) {
+      try {
+        const r = await api("/api/execution-logs/start", {
+          username: USERNAME, depth: STOCKFISH_DEPTH, engine: ENGINE,
+          n_games: allGames.length,
+          n_positions_total: totalPos,
+          expected_seconds_at_start: estSec,
+        });
+        execLogId = r && r.id;
+      } catch (_) { /* telemetria não bloqueia análise */ }
+    }
 
     try {
       log(`▶ Iniciando análise Stockfish [${ENGINE === "local" ? "local WASM" : "API remota"}, depth=${STOCKFISH_DEPTH}] em ${allGames.length} partidas...`, "log-normal");
@@ -1146,7 +1191,7 @@
       // ao DB inteiro do user. Em sessão típica (50 jogos novos pra user com
       // 200 no DB) cai em ~75%.
       const existingByGame = {};   // {game_id: {ply: rowComplete}}
-      let dbHits = 0;
+      // dbHits é hoisted (declarado fora do try) para entrar na telemetria.
       let pendingPostBuffer = [];
       // Flush canônico = ao terminar cada partida (alinha unidade de persistência
       // com unidade lógica). SAFETY_NET força flush em partidas anormalmente longas
@@ -1304,6 +1349,24 @@
     } finally {
       btn.disabled = false; fetchBtn.disabled = false;
       btn.textContent = "⚙ Analisar Stockfish";
+      // Telemetria: encerra registro de execução com métricas finais.
+      if (SERVER_MODE && execLogId) {
+        const status = (typeof allAnalysis !== "undefined" && allAnalysis.length) ? "completed" : "errored";
+        // posições efetivamente rodadas no engine (descontando reuso do DB)
+        const enginePositions = Math.max(0, analyzedPositions - dbHits);
+        try {
+          await api("/api/execution-logs/end", {
+            id: execLogId,
+            duration_seconds: (Date.now() - execStartedAt) / 1000,
+            n_positions_analyzed: enginePositions,
+            n_db_hits: dbHits,
+            n_cache_hits: cacheStats.hits,
+            n_cache_misses: cacheStats.misses,
+            n_failures: apiErrors,
+            status,
+          });
+        } catch (_) { /* não bloquear UI */ }
+      }
       if (allAnalysis.length) {
         log(`💾 ${allAnalysis.length} lances persistidos em history.db. Rode /report-myself ou /report-enemy ${USERNAME} para gerar PDF.`, "log-ok");
       } else {
