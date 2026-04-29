@@ -159,6 +159,19 @@ Auditar o que `build.py` e `compute.py` produzem ao final de uma execução:
 - Snapshots PDF: política de retenção. Hoje todos ficam, sem limite. Considerar limpeza automática de snapshots antigos do mesmo user (manter os últimos N).
 - Sections JSON: similar, todos ficam. Útil para reprocessar com template novo, mas cresce sem bound.
 
+### Tabela de telemetria de execução (recalibração da estimativa)
+
+A estimativa de tempo no `index.html` (linha ~318) usa modelo empírico que está descalibrado — execução recente do miguelrov demorou consideravelmente mais que o estimado. Adicionar tabela `execution_logs` no SQLite para registrar:
+
+- `timestamp_start`, `timestamp_end`, `duration_seconds`
+- `username`, `depth`, `engine` (local/api), `time_classes`
+- `n_games_collected`, `n_user_moves_analyzed`, `n_positions_engine_called` (excluindo dedup hits)
+- `n_failures` (timeouts API, worker errors), `last_error_kind`
+- `cache_hit_rate`, `db_hit_rate`
+- `expected_seconds_at_start` (o que o estimador previu)
+
+Após N execuções acumuladas, usar regressão simples (`actual / expected` médio por engine + depth + n_positions) para recalibrar `estimateSecondsPerPosition`. Endpoint `/api/execution-logs` para o browser registrar; redator pode usar nas warnings ("estimativa pode estar baixa em ~X% para esta config").
+
 ### Outros itens menores
 
 - Reduzir verbosidade do log do servidor: hoje cada GET /api/* aparece em stderr, polui terminal em sessões longas.
