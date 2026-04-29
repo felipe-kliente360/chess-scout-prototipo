@@ -622,3 +622,35 @@ idx = json.load(open("data/tactical/themes_index.json"))
 print(idx["C"]["g:B>K|nT:1|cap:|chk:1|mate:0|tU:0"])
 # {'t': ['mate', 'attraction', 'sacrifice'], 'c': [...], 'n': ...}
 ```
+
+## §22 — Gestão de tempo (relógio) [`time_analysis`]
+
+**Princípio.** Tempo é recurso. Decisão acelerada perde profundidade de cálculo; tempo demais sem resolução é sintoma de viés (otimismo/cegueira tática) ou repertório raso. As duas pontas são informativas.
+
+### Métricas
+
+- **`coverage.time_classes`** — só `bullet/blitz/rapid` (daily ignorado: ritmo é dias por lance, sem pressão de relógio).
+- **`summary.median_time_s`** — tempo mediano por decisão. Calibre: rapid (10min) ~5–8s, blitz (3min) ~1.5–2.5s, bullet (1min) ~0.5–1s.
+- **`by_phase`** — distribuição por abertura/meio/final. Tempo alto na abertura sugere repertório fora do livro; tempo alto no final indica falta de técnica memorizada (Lucena/Philidor/oposição).
+- **`time_pressure.blunder_rate_ratio`** — razão entre erros graves em pressão (clock <10% do orçamento) e fora dela.
+  - **>1.5** → desmonta sob relógio. Plano: treino tático em sessões cronometradas para automatizar padrões (puzzle rush 5min, woodpecker).
+  - **0.8–1.5** → neutro, gestão razoável.
+  - **<0.8** → raro; geralmente artefato de poucos lances em pressão (n_pressed <30 → não confiar).
+- **`time_buckets`** — qualidade por velocidade de decisão (<1s, 1–3s, 3–10s, 10–30s, >30s). Bucket >30s com `mean_loss_cp` alta = "pensou e errou" sistemático: cálculo longo confirma um plano errado em vez de checá-lo. É **ancoragem** (§17 deste theory.md).
+- **`long_think_blunders`** — top-5 lances com tempo ≥p90 que viraram erro (≥100cp). Cada um é um caso individual a estudar: qual era o melhor lance, e qual o viés cognitivo na cadeia de cálculo (otimismo, ancoragem, complacência).
+- **`fast_blunders`** — top-5 lances <2s que viraram blunder (≥300cp). Causas comuns: premove em bullet/blitz, reflexo após sequência forçada (não checou refutação), reaproveitamento de plano após troca inesperada (não recalculou).
+
+### Como narrar (PT-BR direto)
+
+- **Não cite ms.** Sempre segundos arredondados ("3,2s", "12s"). Para lance instantâneo: "<1s" ou "premove".
+- **Cite o orçamento como referência implícita.** "No rapid de 10 min, ele decide a 4,6s mediana — tempo razoável; mas no bucket >30s, perda média sobe para 5,5cp/lance, sintoma de cálculo otimista."
+- **Conecte com vieses (§17) e Teoria dos Plys (§16).** Pensou e errou = otimismo + falha de 2-Ply (calculou X, não calculou refutação Y). Errou rápido = decisão por padrão sem verificação.
+- **Para enemy:** transforma em instrução tática. "Ele desmonta em pressão (razão 2.3×) — force complicações no terço final do tempo, induza cálculo longo em meio-jogo onde ele tem viés de otimismo."
+- **Para myself:** plano de treino. "Treino tático cronometrado (5min) para reduzir blunder rate em pressão. Estudar finais de torre para acelerar decisões no final, onde mediana é 7,9s — tempo gasto reaprendendo o que deveria ser memorizado."
+
+### Limites da métrica
+
+- **Não substitui Score.** Tempo informa COMO decidiu, não SE decidiu bem. ACPL/blend continua canônico para força.
+- **Pressão amostralmente baixa.** Em rapid, jogadores raramente entram em pressão (<5% lances). Razão de blunder em pressão é ruidosa com n_pressed <30 — flag e prefira tendência.
+- **Bullet distorce.** Premove é regra, não exceção. `fast_blunders` em bullet quase sempre captura premove de defesa que falhou — é diagnóstico de **escolha de premove ruim**, não de impulso.
+- **Increment do time_control.** Em "180+2", o orçamento por lance é 2s + saldo do banco; jogador hábil mantém o banco constante. Mediana muito acima do increment indica banco crescente; muito abaixo indica banco esvaziando.

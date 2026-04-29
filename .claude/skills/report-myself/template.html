@@ -15,7 +15,7 @@
 </style>
 </head>
 <body>
-{% from 'macros.html' import sample_warning, score_legend, phases_table, colors_table, time_class_table, openings_family_table, game_card, puzzle_program_block, tactics_summary_table, head_to_head_table, references_list, evolution_block %}
+{% from 'macros.html' import sample_warning, score_legend, phases_table, colors_table, time_class_table, openings_family_table, game_card, puzzle_program_block, tactics_summary_table, head_to_head_table, references_list, evolution_block, time_analysis_block %}
 
 <div class="cover">
   <div class="icon">📘</div>
@@ -122,17 +122,23 @@
 </div>
 
 <div class="section">
-  <h2>9. Pontos fortes e fracos</h2>
+  <h2>9. Gestão de tempo</h2>
+  {{ s.section_time_management | nl2p | safe }}
+  {{ time_analysis_block(c.time_analysis, my_pronoun='você') }}
+</div>
+
+<div class="section">
+  <h2>10. Pontos fortes e fracos</h2>
   {{ s.section_9_strengths | nl2p | safe }}
 </div>
 
 <div class="section">
-  <h2>10. Como adversários podem te vencer</h2>
+  <h2>11. Como adversários podem te vencer</h2>
   {{ s.section_10_opponents | nl2p | safe }}
 </div>
 
 <div class="section">
-  <h2>11. Plano de estudo — próximos 30 dias</h2>
+  <h2>12. Plano de estudo — próximos 30 dias</h2>
   {{ s.section_11_plan | nl2p | safe }}
   {% if c.delta_vs_previous %}
   <h3>Delta vs. relatório de {{ c.delta_vs_previous.previous_date }}</h3>
@@ -158,12 +164,12 @@
 </div>
 
 <div class="section">
-  <h2>12. Programa de treino de puzzles</h2>
+  <h2>13. Programa de treino de puzzles</h2>
   {{ puzzle_program_block(c.puzzle_program, s.section_puzzle_program) }}
 </div>
 
 <div class="section">
-  <h2>13. Partidas-chave (5 melhores vitórias + 5 piores derrotas)</h2>
+  <h2>14. Partidas-chave (5 melhores vitórias + 5 piores derrotas)</h2>
   {{ references_list(c.references) }}
 </div>
 

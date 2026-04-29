@@ -60,13 +60,16 @@ Lê `data/db/history.db` (única fonte). Se já houver `_computed.json` recente 
 | 6 | Como ele perde — padrões de derrota | `section_6_losing_patterns` |
 | 7 | Partidas de referência | `paradigmatic_narratives.game_<N>` |
 | 8 | Números do adversário | (tabelas automáticas) |
-| 9 | Plano de combate | `section_9_battleplan` |
-| 10 | Armadilhas e padrões para induzir | `section_10_traps` |
-| 11 | Programa de treino — você contra ele | `section_puzzle_program` (opcional) |
+| 9 | Gestão de tempo dele | `section_time_management` |
+| 10 | Plano de combate | `section_9_battleplan` |
+| 11 | Armadilhas e padrões para induzir | `section_10_traps` |
+| 12 | Programa de treino — você contra ele | `section_puzzle_program` (opcional) |
 
 **Seção 4 (repertório) — específico:** use `c.openings_by_family` para listar o que ele mais joga; `c.openings_weak_spots` para identificar famílias onde ele perde — essas são as armas a induzir. Citar `c.eco_stats.avg_eco_ply`: se baixo, ele improvisa cedo (atacar com linha forçada); se alto, conhece teoria (sair do livro com transposições laterais).
 
-**Seção 9 (plano de combate) — específico:** 4–6 instruções táticas concretas, ex:
+**Seção 9 (gestão de tempo dele) — específico:** use `c.time_analysis`. Foque na exploração tática: (a) como ele administra o relógio (mediana por fase) — onde ele "afoga" ou "desliga"; (b) leitura de `time_pressure.blunder_rate_ratio`: razão >1.5 indica que ele desmonta sob pressão (acelere; force trocas/complicações no terço final); (c) padrão de "pensou e errou" (top `long_think_blunders`) — viés do otimismo dele em cálculo longo, atacar com posições onde refutação é concreta; (d) "errou rápido" (top `fast_blunders`) — premove ou reflexo, induzir lances forçados em sequência. Encerre com 1 instrução tática (ex: "complique no lance 25–35 — é onde a curva de erro dele dispara em pressão"). Se `available=false`, pule.
+
+**Seção 10 (plano de combate) — específico:** 4–6 instruções táticas concretas, ex:
 1. "Com brancas, jogue X (1.d4 ou 1.c4) para forçá-lo na família Y onde ele tem 25% de win-rate."
 2. "Evite estruturas Z; ele tem score 9,8 nelas."
 3. "Force trocas se a fase for meio-jogo (score 9,5 dele); pressione tecnicamente no final (score 7,8 dele)."
@@ -83,6 +86,7 @@ Salvar como `data/<username>_<timestamp>_enemy_sections.json`:
   "section_1_profile": "...", "section_2_strengths": "...", "section_3_weaknesses": "...",
   "section_4_repertoire": "...", "section_5_colors": "...", "section_6_losing_patterns": "...",
   "paradigmatic_narratives": { "game_<N>": "..." },
+  "section_time_management": "...",
   "section_9_battleplan": "...", "section_10_traps": "..."
 }
 ```

@@ -434,6 +434,159 @@ def derive_puzzle_program(games_df, by_phase, kpis, head_to_head, time_classes):
     }
 
 
+def compute_time_analysis(user_moves, games_lookup) -> dict:
+    """Métricas de gestão de tempo (relógio) do usuário.
+
+    Filtra: lances do user em time_class != 'daily' com time_spent_ms presente
+    e time_control parseável (base inicial em ms).
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from clock import initial_budget_ms  # type: ignore
+
+    if "time_spent_ms" not in user_moves.columns:
+        return {"available": False, "reason": "tabela sem coluna de relógio"}
+
+    sub = user_moves.copy()
+    tc_class_by_gi = {gi: meta.get("time_class") for gi, meta in games_lookup.items()}
+    tc_str_by_gi = {gi: meta.get("time_control") for gi, meta in games_lookup.items()}
+    sub["time_class"] = sub["game_index"].map(tc_class_by_gi)
+    sub["time_control_str"] = sub["game_index"].map(tc_str_by_gi)
+    sub = sub[sub["time_class"] != "daily"]
+    sub = sub[sub["time_spent_ms"].notna() & sub["clock_ms"].notna()]
+    if len(sub) < 20:
+        return {"available": False, "reason": f"amostra insuficiente: {len(sub)} lances com relógio"}
+
+    budget_cache: dict = {}
+    def _budget(tc):
+        key = str(tc)
+        if key not in budget_cache:
+            budget_cache[key] = initial_budget_ms(tc)
+        return budget_cache[key]
+    sub["initial_budget_ms"] = sub["time_control_str"].map(_budget)
+    sub = sub[sub["initial_budget_ms"].notna() & (sub["initial_budget_ms"] > 0)]
+    if len(sub) < 20:
+        return {"available": False, "reason": "sem orçamento de tempo válido"}
+
+    sub["clock_pct"] = pd.to_numeric(sub["clock_ms"], errors="coerce") / sub["initial_budget_ms"]
+    sub["low_time"] = sub["clock_pct"] < 0.10
+    sub["time_spent_s"] = pd.to_numeric(sub["time_spent_ms"], errors="coerce") / 1000.0
+
+    coverage = {
+        "n_moves_with_clock": int(len(sub)),
+        "n_games_with_clock": int(sub["game_index"].nunique()),
+        "time_classes": sorted({str(t) for t in sub["time_class"].dropna().unique()}),
+    }
+
+    median_spent = float(sub["time_spent_s"].median())
+    p90_spent = float(sub["time_spent_s"].quantile(0.90))
+    p10_spent = float(sub["time_spent_s"].quantile(0.10))
+    summary = {
+        "median_time_s": round(median_spent, 2),
+        "p10_time_s": round(p10_spent, 2),
+        "p90_time_s": round(p90_spent, 2),
+    }
+
+    by_phase = {}
+    for ph in ["abertura", "meio-jogo", "final"]:
+        sph = sub[sub["phase"] == ph]
+        if len(sph) < 5:
+            by_phase[ph] = None
+            continue
+        by_phase[ph] = {
+            "n_moves": int(len(sph)),
+            "median_time_s": round(float(sph["time_spent_s"].median()), 2),
+            "mean_time_s": round(float(sph["time_spent_s"].mean()), 2),
+            "p90_time_s": round(float(sph["time_spent_s"].quantile(0.90)), 2),
+            "blunder_rate_pct": round(100 * float((sph["category"] == "blunder").mean()), 1),
+            "low_time_share_pct": round(100 * float(sph["low_time"].mean()), 1),
+        }
+
+    by_time_class = {}
+    for tc, stc in sub.groupby("time_class"):
+        if len(stc) < 5:
+            continue
+        by_time_class[str(tc)] = {
+            "n_moves": int(len(stc)),
+            "median_time_s": round(float(stc["time_spent_s"].median()), 2),
+            "p10_time_s": round(float(stc["time_spent_s"].quantile(0.10)), 2),
+            "p90_time_s": round(float(stc["time_spent_s"].quantile(0.90)), 2),
+            "blunder_rate_pct": round(100 * float((stc["category"] == "blunder").mean()), 1),
+            "low_time_share_pct": round(100 * float(stc["low_time"].mean()), 1),
+        }
+
+    pressed = sub[sub["low_time"]]
+    relaxed = sub[~sub["low_time"]]
+    pressure = None
+    if len(pressed) >= 5 and len(relaxed) >= 5:
+        br_pressed = round(100 * float((pressed["category"] == "blunder").mean()), 1)
+        br_relaxed = round(100 * float((relaxed["category"] == "blunder").mean()), 1)
+        pressure = {
+            "low_time_threshold_pct": 10,
+            "n_moves_pressed": int(len(pressed)),
+            "n_moves_relaxed": int(len(relaxed)),
+            "share_pressed_pct": round(100 * len(pressed) / len(sub), 1),
+            "blunder_rate_pressed_pct": br_pressed,
+            "blunder_rate_relaxed_pct": br_relaxed,
+            "blunder_rate_ratio": round(br_pressed / br_relaxed, 2) if br_relaxed > 0 else None,
+            "mean_loss_pressed_cp": round(float(pressed["loss_cp"].mean()), 1),
+            "mean_loss_relaxed_cp": round(float(relaxed["loss_cp"].mean()), 1),
+        }
+
+    BUCKETS = [(0, 1, "<1s"), (1, 3, "1–3s"), (3, 10, "3–10s"),
+               (10, 30, "10–30s"), (30, 1e9, ">30s")]
+    time_buckets = []
+    for lo, hi, label in BUCKETS:
+        sb = sub[(sub["time_spent_s"] >= lo) & (sub["time_spent_s"] < hi)]
+        if len(sb) == 0:
+            time_buckets.append({"label": label, "n": 0, "share_pct": 0.0,
+                                 "blunder_rate_pct": None, "mean_loss_cp": None})
+            continue
+        time_buckets.append({
+            "label": label,
+            "n": int(len(sb)),
+            "share_pct": round(100 * len(sb) / len(sub), 1),
+            "blunder_rate_pct": round(100 * float((sb["category"] == "blunder").mean()), 1),
+            "mean_loss_cp": round(float(sb["loss_cp"].mean()), 1),
+        })
+
+    def _enrich(row):
+        meta = games_lookup.get(int(row["game_index"]), {})
+        return {
+            "game_index": int(row["game_index"]),
+            "ply": int(row["ply"]),
+            "phase": row["phase"],
+            "san": row["move_san"],
+            "best_move": row.get("best_move", ""),
+            "time_spent_s": round(float(row["time_spent_s"]), 2),
+            "loss_cp": round(float(row["loss_cp"]), 1),
+            "category": row["category"],
+            "fen_before": row["fen_before"],
+            "url": meta.get("url"),
+            "result": meta.get("result"),
+            "opponent": meta.get("opponent"),
+            "color": meta.get("color"),
+            "time_class": meta.get("time_class"),
+        }
+
+    long_thinks = sub[(sub["time_spent_s"] >= p90_spent) & (sub["loss_cp"] >= 100)]
+    long_think_top = [_enrich(r) for _, r in long_thinks.nlargest(5, "loss_cp").iterrows()]
+
+    fast_blunders = sub[(sub["time_spent_s"] < 2.0) & (sub["category"] == "blunder")]
+    fast_blunder_top = [_enrich(r) for _, r in fast_blunders.nlargest(5, "loss_cp").iterrows()]
+
+    return {
+        "available": True,
+        "coverage": coverage,
+        "summary": summary,
+        "by_phase": by_phase,
+        "by_time_class": by_time_class,
+        "time_pressure": pressure,
+        "time_buckets": time_buckets,
+        "long_think_blunders": long_think_top,
+        "fast_blunders": fast_blunder_top,
+    }
+
+
 def safe_int(v, default=0):
     try:
         return int(v)
@@ -472,6 +625,14 @@ def load_from_db(username: str) -> tuple[pd.DataFrame, pd.DataFrame, int | None,
     games_rows = history.fetch_games(conn, username)
     if not games_rows:
         raise SystemExit(f"❌ nenhuma partida em history.db para {username}.")
+    # Backfill de relógio (clock_ms, time_spent_ms): idempotente, lê PGN e extrai %clk.
+    try:
+        bf_stats = history.backfill_clocks_for_user(conn, username)
+        if bf_stats.get("plies_updated", 0):
+            print(f"   ⏱  backfill de relógio: {bf_stats['plies_updated']} plies atualizados em "
+                  f"{bf_stats['games_processed']} partidas (daily ignoradas: {bf_stats['games_skipped_daily']})")
+    except Exception as e:
+        print(f"⚠ backfill de relógio falhou: {e}")
     analyses_rows = history.fetch_analyses_for_user(conn, username, min_depth=0)
     conn.close()
     if not analyses_rows:
@@ -547,6 +708,9 @@ def main():
         gids_col = group.get("game_id", pd.Series([None] * total_plies)).tolist()
         # Cache de position_facts já gravado no DB (modo --from-db). String JSON ou vazio.
         cached_facts = group.get("position_facts", pd.Series([""] * total_plies)).fillna("").tolist()
+        # Relógio (vem do PGN via backfill em history.py).
+        clocks_ms_col = group.get("clock_ms", pd.Series([None] * total_plies)).tolist()
+        spent_ms_col = group.get("time_spent_ms", pd.Series([None] * total_plies)).tolist()
 
         for i in range(total_plies):
             cp_before = cps[i]
@@ -594,6 +758,8 @@ def main():
                 "tactical_source": str(sources[i]) if i < len(sources) else "",
                 "position_facts": facts_list,
                 "_facts_computed_now": facts_were_computed,
+                "clock_ms": clocks_ms_col[i] if i < len(clocks_ms_col) else None,
+                "time_spent_ms": spent_ms_col[i] if i < len(spent_ms_col) else None,
             })
 
     moves_df = pd.DataFrame(move_records)
@@ -1319,6 +1485,8 @@ def main():
         "weighted_score_10": weighted_score,
     }
 
+    time_analysis = compute_time_analysis(user_moves, games_lookup)
+
     puzzle_program = derive_puzzle_program(
         games_df=games_df,
         by_phase=by_phase,
@@ -1407,6 +1575,7 @@ def main():
             "avg_eco_ply": avg_eco_ply_overall,
             "avg_eco_ply_by_color": avg_eco_ply_by_color,
         },
+        "time_analysis": time_analysis,
         "puzzle_program": puzzle_program,
         "score_calibration": score_calibration,
         "head_to_head": head_to_head,

@@ -15,7 +15,7 @@
 </style>
 </head>
 <body>
-{% from 'macros.html' import sample_warning, score_legend, phases_table, colors_table, time_class_table, openings_family_table, game_card, puzzle_program_block, head_to_head_table, references_list, evolution_block %}
+{% from 'macros.html' import sample_warning, score_legend, phases_table, colors_table, time_class_table, openings_family_table, game_card, puzzle_program_block, head_to_head_table, references_list, evolution_block, time_analysis_block %}
 
 <div class="cover">
   <div class="icon">🎯</div>
@@ -120,22 +120,28 @@
 </div>
 
 <div class="section">
-  <h2>9. Plano de combate</h2>
+  <h2>9. Gestão de tempo dele</h2>
+  {{ s.section_time_management | nl2p | safe }}
+  {{ time_analysis_block(c.time_analysis, my_pronoun='ele') }}
+</div>
+
+<div class="section">
+  <h2>10. Plano de combate</h2>
   {{ s.section_9_battleplan | nl2p | safe }}
 </div>
 
 <div class="section">
-  <h2>10. Armadilhas e padrões para induzir</h2>
+  <h2>11. Armadilhas e padrões para induzir</h2>
   {{ s.section_10_traps | nl2p | safe }}
 </div>
 
 <div class="section">
-  <h2>11. Programa de treino — você contra ele</h2>
+  <h2>12. Programa de treino — você contra ele</h2>
   {{ puzzle_program_block(c.puzzle_program, s.section_puzzle_program) }}
 </div>
 
 <div class="section">
-  <h2>12. Partidas-chave (5 melhores vitórias dele + 5 piores derrotas dele)</h2>
+  <h2>13. Partidas-chave (5 melhores vitórias dele + 5 piores derrotas dele)</h2>
   {{ references_list(c.references) }}
 </div>
 

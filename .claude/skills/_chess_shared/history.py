@@ -100,6 +100,8 @@ CREATE TABLE IF NOT EXISTS game_analyses (
   tactical_confidence REAL,
   tactical_source TEXT,
   position_facts TEXT,           -- JSON list[dict] com fatos estruturais; vazio se loss_cp < 50
+  clock_ms INTEGER,              -- relógio remanescente após o lance (do PGN [%clk]); NULL se sem dado
+  time_spent_ms INTEGER,         -- tempo gasto naquele lance (já incluindo increment); NULL idem
   analyzed_at TEXT NOT NULL,
   PRIMARY KEY (game_id, ply)
 );
@@ -171,6 +173,12 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
     existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(game_analyses)")}
     if "position_facts" not in existing_cols:
         conn.execute("ALTER TABLE game_analyses ADD COLUMN position_facts TEXT")
+        conn.commit()
+    if "clock_ms" not in existing_cols:
+        conn.execute("ALTER TABLE game_analyses ADD COLUMN clock_ms INTEGER")
+        conn.commit()
+    if "time_spent_ms" not in existing_cols:
+        conn.execute("ALTER TABLE game_analyses ADD COLUMN time_spent_ms INTEGER")
         conn.commit()
     return conn
 
@@ -480,6 +488,74 @@ def games_needing_analysis(conn: sqlite3.Connection, username: str,
         if d["plies_done"] == 0 or d["min_depth_done"] < target_depth:
             out.append(d)
     return out
+
+
+def backfill_clocks_for_user(conn: sqlite3.Connection, username: str) -> dict:
+    """Para cada partida do user com PGN e ainda sem clock_ms preenchido,
+    extrai `[%clk]` e popula clock_ms + time_spent_ms em game_analyses.
+    Idempotente — só preenche linhas onde clock_ms IS NULL.
+
+    Retorna {games_processed, plies_updated, games_skipped_no_pgn,
+            games_skipped_daily, games_no_clock_data}."""
+    from clock import extract_clocks  # type: ignore
+
+    stats = {
+        "games_processed": 0,
+        "plies_updated": 0,
+        "games_skipped_no_pgn": 0,
+        "games_skipped_daily": 0,
+        "games_no_clock_data": 0,
+    }
+
+    # Lista games do user que ainda têm pelo menos uma análise sem clock_ms.
+    cur = conn.execute("""
+      SELECT g.game_id, g.pgn, g.time_control, g.time_class
+      FROM games g
+      WHERE g.username = ?
+        AND EXISTS (
+          SELECT 1 FROM game_analyses ga
+          WHERE ga.game_id = g.game_id AND ga.clock_ms IS NULL
+        )
+    """, (username,))
+    targets = cur.fetchall()
+    for row in targets:
+        gid = row["game_id"]
+        pgn = row["pgn"] or ""
+        tc = row["time_control"]
+        if not pgn:
+            stats["games_skipped_no_pgn"] += 1
+            continue
+        # Daily / correspondência: %clk não significa pressão de tempo.
+        if tc and "/" in str(tc):
+            stats["games_skipped_daily"] += 1
+            continue
+        clocks = extract_clocks(pgn, tc)
+        if not clocks:
+            stats["games_no_clock_data"] += 1
+            continue
+        # Update por ply, só nas linhas existentes em game_analyses para esse game.
+        for entry in clocks:
+            if entry.get("clock_ms") is None:
+                continue
+            cur = conn.execute("""
+              UPDATE game_analyses
+              SET clock_ms = ?, time_spent_ms = ?
+              WHERE game_id = ? AND ply = ? AND clock_ms IS NULL
+            """, (
+                entry["clock_ms"],
+                entry.get("time_spent_ms"),
+                gid,
+                int(entry["ply"]),
+            ))
+            stats["plies_updated"] += cur.rowcount or 0
+        stats["games_processed"] += 1
+    conn.commit()
+    stats["plies_with_clock_total"] = conn.execute(
+        "SELECT COUNT(*) AS n FROM game_analyses ga JOIN games g ON g.game_id=ga.game_id "
+        "WHERE g.username = ? AND ga.clock_ms IS NOT NULL",
+        (username,),
+    ).fetchone()["n"]
+    return stats
 
 
 def analysis_summary(conn: sqlite3.Connection, username: str) -> dict:

@@ -233,6 +233,137 @@
 {% endif %}
 {% endmacro %}
 
+{% macro time_analysis_block(ta, my_pronoun='você') %}
+{% if ta and ta.available %}
+<p style="font-size:9pt;color:#777;margin-top:-2px">
+  Base: {{ ta.coverage.n_moves_with_clock }} lances {{ 'seus' if my_pronoun == 'você' else 'dele' }} em {{ ta.coverage.n_games_with_clock }} partidas com relógio (ritmos: {{ ta.coverage.time_classes|join(', ') }}). Daily/correspondência ignorada — não há pressão de relógio.
+</p>
+
+<h3>Tempo gasto por fase</h3>
+<table>
+  <thead>
+    <tr><th>Fase</th><th class="num">Lances</th><th class="num">Mediana</th><th class="num">Média</th><th class="num">p90</th><th class="num">% em pressão</th><th class="num">Erros graves %</th></tr>
+  </thead>
+  <tbody>
+    {% for ph in ['abertura', 'meio-jogo', 'final'] %}
+    {% set p = ta.by_phase[ph] %}
+    {% if p %}
+    <tr>
+      <td>{{ ph|capitalize }}</td>
+      <td class="num">{{ p.n_moves }}</td>
+      <td class="num">{{ p.median_time_s }}s</td>
+      <td class="num">{{ p.mean_time_s }}s</td>
+      <td class="num">{{ p.p90_time_s }}s</td>
+      <td class="num">{{ p.low_time_share_pct }}%</td>
+      <td class="num">{{ p.blunder_rate_pct }}%</td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if ta.by_time_class and ta.by_time_class|length > 1 %}
+<h3>Por ritmo de jogo</h3>
+<table>
+  <thead>
+    <tr><th>Ritmo</th><th class="num">Lances</th><th class="num">Mediana</th><th class="num">p10</th><th class="num">p90</th><th class="num">% em pressão</th><th class="num">Erros graves %</th></tr>
+  </thead>
+  <tbody>
+    {% for tc, b in ta.by_time_class.items() %}
+    <tr>
+      <td>{{ tc }}</td>
+      <td class="num">{{ b.n_moves }}</td>
+      <td class="num">{{ b.median_time_s }}s</td>
+      <td class="num">{{ b.p10_time_s }}s</td>
+      <td class="num">{{ b.p90_time_s }}s</td>
+      <td class="num">{{ b.low_time_share_pct }}%</td>
+      <td class="num">{{ b.blunder_rate_pct }}%</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if ta.time_pressure %}
+{% set tp = ta.time_pressure %}
+<h3>Pressão de relógio (clock &lt; 10% do orçamento)</h3>
+<div class="kpi-grid">
+  <div class="kpi"><div class="v">{{ tp.share_pressed_pct }}%</div><div class="l">Lances em pressão</div></div>
+  <div class="kpi"><div class="v">{{ tp.blunder_rate_pressed_pct }}%</div><div class="l">Erros graves em pressão</div></div>
+  <div class="kpi"><div class="v">{{ tp.blunder_rate_relaxed_pct }}%</div><div class="l">Erros graves fora de pressão</div></div>
+  {% if tp.blunder_rate_ratio is not none %}
+  <div class="kpi"><div class="v">{{ tp.blunder_rate_ratio }}×</div><div class="l">Razão (pressão / sem pressão)</div></div>
+  {% endif %}
+</div>
+<p style="font-size:9pt;color:#777">Razão &gt;1 indica que pressão de relógio degrada a qualidade. Razão &lt;1 sugere que pressão é absorvida (raro — geralmente é viés amostral por poucos lances em pressão).</p>
+{% endif %}
+
+<h3>Qualidade por velocidade da decisão</h3>
+<table>
+  <thead>
+    <tr><th>Tempo gasto</th><th class="num">Lances</th><th class="num">% das jogadas</th><th class="num">Erros graves %</th><th class="num">Perda média (cp)</th></tr>
+  </thead>
+  <tbody>
+    {% for b in ta.time_buckets %}
+    <tr>
+      <td>{{ b.label }}</td>
+      <td class="num">{{ b.n }}</td>
+      <td class="num">{{ b.share_pct }}%</td>
+      <td class="num">{{ b.blunder_rate_pct if b.blunder_rate_pct is not none else '—' }}{% if b.blunder_rate_pct is not none %}%{% endif %}</td>
+      <td class="num">{{ b.mean_loss_cp if b.mean_loss_cp is not none else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if ta.long_think_blunders %}
+<h3>Pensou e errou — top {{ ta.long_think_blunders|length }} (tempo ≥ p90 com erro ≥ 100cp)</h3>
+<table>
+  <thead>
+    <tr><th>Partida</th><th>Fase</th><th class="num">Ply</th><th>Lance</th><th>Melhor</th><th class="num">Tempo</th><th class="num">Perda</th></tr>
+  </thead>
+  <tbody>
+    {% for x in ta.long_think_blunders %}
+    <tr>
+      <td>#{{ x.game_index }} vs {{ x.opponent }} ({{ x.result }}){% if x.url %} · <a href="{{ x.url }}">link</a>{% endif %}</td>
+      <td>{{ x.phase }}</td>
+      <td class="num">{{ x.ply }}</td>
+      <td><b>{{ x.san }}</b></td>
+      <td>{{ x.best_move or '—' }}</td>
+      <td class="num">{{ x.time_spent_s }}s</td>
+      <td class="num">−{{ x.loss_cp }}cp</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if ta.fast_blunders %}
+<h3>Errou rápido — top {{ ta.fast_blunders|length }} (decisão em &lt;2s e erro grave)</h3>
+<table>
+  <thead>
+    <tr><th>Partida</th><th>Fase</th><th class="num">Ply</th><th>Lance</th><th>Melhor</th><th class="num">Tempo</th><th class="num">Perda</th></tr>
+  </thead>
+  <tbody>
+    {% for x in ta.fast_blunders %}
+    <tr>
+      <td>#{{ x.game_index }} vs {{ x.opponent }} ({{ x.result }}){% if x.url %} · <a href="{{ x.url }}">link</a>{% endif %}</td>
+      <td>{{ x.phase }}</td>
+      <td class="num">{{ x.ply }}</td>
+      <td><b>{{ x.san }}</b></td>
+      <td>{{ x.best_move or '—' }}</td>
+      <td class="num">{{ x.time_spent_s }}s</td>
+      <td class="num">−{{ x.loss_cp }}cp</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% elif ta and not ta.available %}
+<p style="color:#888;font-style:italic">Sem dados de relógio para esta amostra ({{ ta.reason }}).</p>
+{% endif %}
+{% endmacro %}
+
 {% macro references_list(refs) %}
 <ol class="ref-list">
   {% for ref in refs %}

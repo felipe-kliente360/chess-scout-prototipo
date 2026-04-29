@@ -73,12 +73,15 @@ Lê `data/db/history.db` (única fonte). Gera `data/<username>_<timestamp>_compu
 | 6 | Como conduz finais | `section_6_endgames` |
 | 7 | Partidas que definem o momento (4 partidas: 2 melhores vitórias + 2 piores derrotas) | `paradigmatic_narratives.game_<N>` |
 | 8 | Números do ciclo | (tabelas automáticas) |
-| 9 | Pontos fortes e fracos | `section_9_strengths` |
-| 10 | Como adversários podem te vencer | `section_10_opponents` |
-| 11 | Plano de estudo — próximos 30 dias | `section_11_plan` |
-| 12 | Programa de treino de puzzles | `section_puzzle_program` (opcional) |
+| 9 | Gestão de tempo | `section_time_management` |
+| 10 | Pontos fortes e fracos | `section_9_strengths` |
+| 11 | Como adversários podem te vencer | `section_10_opponents` |
+| 12 | Plano de estudo — próximos 30 dias | `section_11_plan` |
+| 13 | Programa de treino de puzzles | `section_puzzle_program` (opcional) |
 
 **Seção 5 (aberturas) — específico:** use `c.openings_by_family` para descrever famílias dominantes; `c.eco_stats.avg_eco_ply` para profundidade média de teoria; `c.openings_weak_spots` para alvos de estudo. Veja faixas em `theory.md` seção 5b.
+
+**Seção 9 (gestão de tempo) — específico:** use `c.time_analysis` (se `available=true`). Tabelas e KPIs já são renderizados pelo macro `time_analysis_block`; você escreve `section_time_management` (1–2 parágrafos) cobrindo: (a) padrão geral de uso de tempo (mediana por fase, onde gasta mais), (b) o que a pressão de relógio (`time_pressure.blunder_rate_ratio`) revela — degradação real vs. neutra, (c) leitura de "pensou e errou" (cálculo longo que falhou — viés de otimismo / cegueira tática) e "errou rápido" (premove ou impulso). Termine com 1 frase prática (ex: "regule o relógio na transição abertura→meio-jogo: 65% dos seus erros graves vêm de decisões em &lt;3s lá"). Se `available=false`, pule a seção (template já mostra mensagem apropriada). Veja §22 do theory.md para guia conceitual.
 
 **Seção 11 (plano) — específico:** 3–5 prescrições priorizadas por retorno/tempo. Categoria fixa "primeiro estudar finais clássicos se for o ponto fraco" (Lucena/Philidor/oposição), depois repertório, depois cobertura ECO/depth se baixo. Calibre pelo `confidence_pct`.
 
@@ -91,6 +94,7 @@ Salvar como `data/<username>_<timestamp>_myself_sections.json`:
   "section_1_intro": "...", "section_2_phases": "...", "section_3_colors": "...",
   "section_4_tactics": "...", "section_5_openings": "...", "section_6_endgames": "...",
   "paradigmatic_narratives": { "game_<N>": "..." },
+  "section_time_management": "...",
   "section_9_strengths": "...", "section_10_opponents": "...", "section_11_plan": "..."
 }
 ```
