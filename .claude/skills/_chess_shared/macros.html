@@ -1,0 +1,237 @@
+{# Macros compartilhados entre report-myself e report-enemy. #}
+
+{% macro sample_warning(sq) %}
+{% if sq and sq.warnings %}
+<div class="sample-warn">
+  <div class="title">⚠ Limites desta amostra — leia antes de seguir</div>
+  <ul>
+    {% for w in sq.warnings %}<li>{{ w }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro score_legend(possessivo='seu') %}
+<div class="score-legend">
+  <div class="title">Como ler o Score (0–10) usado neste relatório</div>
+  Compara o nível de erro {{ possessivo }} com o esperado para {{ 'o seu' if possessivo == 'seu' else 'o' }} rating{{ ' dele' if possessivo != 'seu' else '' }}. <b>6 ≈ jogou como esperado</b>; acima de 6 = jogou melhor; abaixo = jogou pior.
+  <table>
+    <tr><th>Score</th><th>Leitura</th></tr>
+    <tr><td><b>9–10</b></td><td>Muito acima do esperado para o rating</td></tr>
+    <tr><td><b>7–9</b></td><td>Acima do esperado</td></tr>
+    <tr><td><b>5,5–6,5</b></td><td>Como esperado (baseline)</td></tr>
+    <tr><td><b>4–5,5</b></td><td>Abaixo do esperado</td></tr>
+    <tr><td><b>&lt; 4</b></td><td>Bem abaixo do esperado</td></tr>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro phases_table(by_phase) %}
+<table>
+  <thead>
+    <tr><th>Fase</th><th class="num">Lances</th><th class="num">Score (0–10)</th><th class="num">Erros graves</th><th class="num">Erros médios</th></tr>
+  </thead>
+  <tbody>
+    {% for ph in ['abertura', 'meio-jogo', 'final'] %}
+    {% set p = by_phase[ph] %}
+    <tr>
+      <td>{{ ph|capitalize }}</td>
+      <td class="num">{{ p.n_moves }}</td>
+      <td class="num">{{ p.score_10 }}</td>
+      <td class="num">{{ p.blunders }}</td>
+      <td class="num">{{ p.mistakes }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro colors_table(by_color, color_label='Cor') %}
+<table>
+  <thead>
+    <tr><th>{{ color_label }}</th><th class="num">Partidas</th><th class="num">V/D/E</th><th class="num">Win-rate</th><th class="num">Score</th></tr>
+  </thead>
+  <tbody>
+    {% for color in ['White', 'Black'] %}
+    {% set b = by_color[color] %}
+    <tr>
+      <td>{{ color }}</td>
+      <td class="num">{{ b.games }}</td>
+      <td class="num">{{ b.wins }}/{{ b.losses }}/{{ b.draws }}</td>
+      <td class="num">{{ b.win_rate }}%</td>
+      <td class="num">{{ b.score_10 }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro time_class_table(by_time_class, score_label='Score', subtitle='') %}
+{% if by_time_class and by_time_class|length > 1 %}
+{% if subtitle %}<p style="font-size:9pt;color:#777;margin-top:-2px">{{ subtitle }}</p>{% endif %}
+<table>
+  <thead>
+    <tr><th>Ritmo</th><th class="num">Partidas</th><th class="num">V/D/E</th><th class="num">Win-rate</th><th class="num">{{ score_label }}</th><th class="num">Erros graves</th></tr>
+  </thead>
+  <tbody>
+    {% for tc, b in by_time_class.items() %}
+    <tr>
+      <td>{{ tc }}</td>
+      <td class="num">{{ b.games }}</td>
+      <td class="num">{{ b.wins }}/{{ b.losses }}/{{ b.draws }}</td>
+      <td class="num">{{ b.win_rate }}%</td>
+      <td class="num">{{ b.score_10 }}</td>
+      <td class="num">{{ b.blunders }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endmacro %}
+
+{% macro openings_family_table(families, headers=None) %}
+{% set h = headers or {'name': 'Família', 'score': 'Score', 'theory': 'Profundidade'} %}
+<table>
+  <thead>
+    <tr>
+      <th>{{ h.name }}</th><th class="num">N</th>
+      <th class="num">V/D/E</th><th class="num">% Vitória</th>
+      <th class="num">{{ h.score }}</th><th class="num">{{ h.theory }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for op in families[:8] %}
+    <tr>
+      <td>{{ op.name }}</td>
+      <td class="num">{{ op.n }}</td>
+      <td class="num">{{ op.wins }}/{{ op.losses }}/{{ op.draws }}</td>
+      <td class="num">{{ op.win_rate }}%</td>
+      <td class="num">{{ op.score_10 if op.score_10 is not none else '—' }}</td>
+      <td class="num">{{ op.avg_eco_ply if op.avg_eco_ply is not none else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro game_card(g, narratives, my_pronoun='você', opp_pronoun='adversário') %}
+<div class="game-card">
+  <h3>Partida #{{ g.game_index }} — vs. {{ g.opponent }} ({{ g.opponent_rating }})</h3>
+  <div class="meta">
+    {{ g.date }} · cor{{ ' dele' if my_pronoun != 'você' else '' }}: {{ g.color }} · {{ g.time_class }} · score {{ g.score_10 }}/10 · {{ g.n_user_moves }} lances
+    {% if g.url %}· <a href="{{ g.url }}">link</a>{% endif %}
+  </div>
+  {% set key = 'game_' ~ g.game_index %}
+  {% if narratives and narratives[key] %}
+    {{ narratives[key] | nl2p | safe }}
+  {% endif %}
+  <div class="key-positions">
+    {% for kp in g.key_positions %}
+    <div class="kp">
+      {{ kp.board_svg | safe }}
+      <div class="ply">Ply {{ kp.ply }} · {{ kp.phase }} · {% if kp.is_user_move %}{{ 'seu lance' if my_pronoun == 'você' else 'lance dele' }}{% else %}{{ opp_pronoun }}{% endif %}</div>
+      <div class="label">
+        jogou <b>{{ kp.san }}</b> · melhor: <b>{{ kp.best_san or kp.best }}</b>
+        {% if kp.swing_cp and kp.swing_cp >= 30 %}<br><span style="color:var(--accent-text)">virada: +{{ kp.swing_cp }}cp a favor do vencedor</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro puzzle_program_block(pp, narrative=None) %}
+{% if narrative %}{{ narrative | nl2p | safe }}{% endif %}
+{% if pp %}
+<div class="kpi-grid">
+  <div class="kpi"><div class="v">{{ pp.suggested_rating }}</div><div class="l">Rating sugerido</div></div>
+  <div class="kpi"><div class="v">{{ pp.rating_range[0] }}–{{ pp.rating_range[1] }}</div><div class="l">Faixa</div></div>
+  <div class="kpi"><div class="v">{{ pp.themes|length }}</div><div class="l">Temas</div></div>
+</div>
+<p style="font-size:9pt;color:#777;margin-top:-8px">Base do rating: {{ pp.rating_basis }}</p>
+<table>
+  <thead>
+    <tr><th>Tema (chave)</th><th>O que é</th><th class="num">Prioridade</th><th>Por quê</th></tr>
+  </thead>
+  <tbody>
+    {% for t in pp.themes %}
+    <tr>
+      <td><code>{{ t.theme }}</code></td>
+      <td>{{ t.label }}</td>
+      <td class="num">{{ t.priority }}</td>
+      <td>{{ t.rationale }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p style="font-size:9pt;color:#777">Estes valores também estão em <code>puzzle_program</code> no JSON computado para integração com o app de treino tático.</p>
+{% endif %}
+{% endmacro %}
+
+{% macro tactics_summary_table(kpis) %}
+{% set total = kpis.blunders + kpis.mistakes + kpis.inaccuracies + kpis.good_moves %}
+<table>
+  <thead>
+    <tr><th>Categoria</th><th class="num">Quantidade</th><th class="num">% das jogadas</th></tr>
+  </thead>
+  <tbody>
+    {% for cat, val in [('Erros graves', kpis.blunders), ('Erros médios', kpis.mistakes), ('Imprecisões', kpis.inaccuracies), ('Boas', kpis.good_moves)] %}
+    <tr><td>{{ cat }}</td><td class="num">{{ val }}</td><td class="num">{{ "%.1f"|format(100*val/total if total else 0) }}%</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro head_to_head_table(h2h) %}
+<table>
+  <thead>
+    <tr><th>Adversário</th><th class="num">Jogos</th><th class="num">V/D/E</th><th class="num">Rating médio</th></tr>
+  </thead>
+  <tbody>
+    {% for h in h2h %}
+    <tr>
+      <td>{{ h.opponent }}</td>
+      <td class="num">{{ h.games }}</td>
+      <td class="num">{{ h.wins }}/{{ h.losses }}/{{ h.draws }}</td>
+      <td class="num">{{ h.avg_opp_rating }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro evolution_block(history, charts) %}
+{% if history and history|length >= 2 %}
+<table>
+  <thead>
+    <tr><th>Ciclo</th><th class="num">Partidas (rel/col)</th><th class="num">Win-rate</th><th class="num">Score</th><th class="num">Confiança</th></tr>
+  </thead>
+  <tbody>
+    {% for h in history %}
+    <tr>
+      <td>{{ h.stamp[:8] }}</td>
+      <td class="num">{{ h.n_games_relevant or '—' }}/{{ h.n_games_collected or '—' }}</td>
+      <td class="num">{{ h.win_rate }}%</td>
+      <td class="num">{{ h.score_10 }}</td>
+      <td class="num">{{ h.confidence_pct or '—' }}%</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if charts %}
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+  {% if charts.score_10 %}<div><div style="font-size:8.5pt;color:#666;margin-bottom:2px">Score (0–10)</div>{{ charts.score_10 | safe }}</div>{% endif %}
+  {% if charts.win_rate %}<div><div style="font-size:8.5pt;color:#666;margin-bottom:2px">Win-rate (%)</div>{{ charts.win_rate | safe }}</div>{% endif %}
+  {% if charts.confidence_pct %}<div><div style="font-size:8.5pt;color:#666;margin-bottom:2px">Confiança (%)</div>{{ charts.confidence_pct | safe }}</div>{% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro references_list(refs) %}
+<ol class="ref-list">
+  {% for ref in refs %}
+  <li>{{ ref.label }} — <a href="{{ ref.url }}">{{ ref.url }}</a></li>
+  {% endfor %}
+</ol>
+{% endmacro %}

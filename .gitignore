@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Dados de usuários (PII) — ficam só local
+data/*/
+data/*.csv
+data/*.json
+data/history.db
+
+# Cache regenerável (2MB, recriado por scripts/export_cache.py)
+data/openings/position_cache.json
+
+# Permite as bases CC0 do Lichess (necessárias pro app rodar fresh-clone)
+!data/openings/
+!data/openings/*.tsv
+!data/openings/eco.json
+
+# Settings locais
+.claude/settings.local.json

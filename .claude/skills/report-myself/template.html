@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Plano de Estudo — {{ c.username }}</title>
+<style>
+  :root {
+    --accent: #2a7a55;
+    --accent-bg: #f3faf6;
+    --accent-soft: #c9e2d4;
+    --accent-text: #1c5040;
+  }
+  @page { @bottom-left { content: "{{ c.username }} · plano · {{ stamp }}"; font-size: 8.5pt; color: #888; } }
+  {% include 'base.css' %}
+</style>
+</head>
+<body>
+{% from 'macros.html' import sample_warning, score_legend, phases_table, colors_table, time_class_table, openings_family_table, game_card, puzzle_program_block, tactics_summary_table, head_to_head_table, references_list, evolution_block %}
+
+<div class="cover">
+  <div class="icon">📘</div>
+  <h1>Plano de Estudo — {{ c.username }}</h1>
+  <div class="sub">Diagnóstico próprio · ciclo {{ stamp }}</div>
+  <div class="meta">
+    {{ c.sample_quality.n_games_relevant }} partidas relevantes (de {{ c.kpis.n_games }} coletadas) ·
+    confiabilidade da amostra: {{ c.sample_quality.confidence_pct }}%
+  </div>
+</div>
+
+{{ sample_warning(c.sample_quality) }}
+{{ score_legend('seu') }}
+
+<div class="section">
+  <h2>1. Onde você está hoje</h2>
+  {{ s.section_1_intro | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>2. Precisão por fase</h2>
+  {{ s.section_2_phases | nl2p | safe }}
+  {{ phases_table(c.by_phase) }}
+</div>
+
+<div class="section">
+  <h2>3. Padrões por cor</h2>
+  {{ s.section_3_colors | nl2p | safe }}
+  {{ colors_table(c.by_color) }}
+  {% if c.by_time_class and c.by_time_class|length > 1 %}
+  <h3>Por ritmo de jogo</h3>
+  {{ time_class_table(c.by_time_class, subtitle='Daily (horas/lance) infla o score; bullet (segundos) deprime. Cruze antes de comparar.') }}
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2>4. Erros táticos: onde e por quê</h2>
+  {{ s.section_4_tactics | nl2p | safe }}
+  {{ tactics_summary_table(c.kpis) }}
+</div>
+
+<div class="section">
+  <h2>5. Aberturas e repertório</h2>
+  {{ s.section_5_openings | nl2p | safe }}
+  {% if c.openings_by_family and c.openings_by_family[0].name != 'Sem ECO' %}
+  <h3>Famílias mais jogadas</h3>
+  {{ openings_family_table(c.openings_by_family) }}
+  {% endif %}
+  {% if c.openings_weak_spots %}
+  <h3>Onde você mais perde (n ≥ 5, vitória &lt; 40%)</h3>
+  <table>
+    <thead><tr><th>Família</th><th class="num">N</th><th class="num">% Vitória</th><th class="num">Score</th></tr></thead>
+    <tbody>
+      {% for op in c.openings_weak_spots %}
+      <tr>
+        <td>{{ op.name }}</td>
+        <td class="num">{{ op.n }}</td>
+        <td class="num">{{ op.win_rate }}%</td>
+        <td class="num">{{ op.score_10 if op.score_10 is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2>6. Como conduz finais</h2>
+  {{ s.section_6_endgames | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>7. Partidas mais relevantes</h2>
+  <p style="font-size:9.5pt;color:#777;margin-top:-2px">Filtradas por relevância: ≥ 25 lances do usuário e sem abandonos. Critério: 2 melhores vitórias + 2 piores derrotas.</p>
+  <h3>Melhores vitórias</h3>
+  {% for g in c.paradigmatic_games if g.result == 'Win' %}
+    {{ game_card(g, s.paradigmatic_narratives, my_pronoun='você', opp_pronoun='adversário') }}
+  {% endfor %}
+  <h3>Piores derrotas</h3>
+  {% for g in c.paradigmatic_games if g.result == 'Loss' %}
+    {{ game_card(g, s.paradigmatic_narratives, my_pronoun='você', opp_pronoun='adversário') }}
+  {% endfor %}
+</div>
+
+<div class="section">
+  <h2>8. Números do ciclo</h2>
+  <div class="kpi-grid">
+    <div class="kpi"><div class="v">{{ c.kpis.n_games }}</div><div class="l">Partidas</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.win_rate }}%</div><div class="l">Win-rate</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.score_10 }}/10</div><div class="l">Score geral</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.blunders }}</div><div class="l">Erros graves</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.mistakes }}</div><div class="l">Erros médios</div></div>
+    {% if c.eco_stats and c.eco_stats.avg_eco_ply %}
+    <div class="kpi"><div class="v">{{ c.eco_stats.avg_eco_ply }}</div><div class="l">Lances de teoria</div></div>
+    {% endif %}
+  </div>
+  <h3>Adversários mais frequentes</h3>
+  {{ head_to_head_table(c.head_to_head) }}
+
+  {% if c.history and c.history|length >= 2 %}
+  <h3>Evolução ao longo dos ciclos</h3>
+  {{ evolution_block(c.history, c.evolution_charts) }}
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2>9. Pontos fortes e fracos</h2>
+  {{ s.section_9_strengths | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>10. Como adversários podem te vencer</h2>
+  {{ s.section_10_opponents | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>11. Plano de estudo — próximos 30 dias</h2>
+  {{ s.section_11_plan | nl2p | safe }}
+  {% if c.delta_vs_previous %}
+  <h3>Delta vs. relatório de {{ c.delta_vs_previous.previous_date }}</h3>
+  <table>
+    <thead><tr><th>KPI</th><th class="num">Anterior → Atual</th><th class="num">Δ</th></tr></thead>
+    <tbody>
+      {% set d = c.delta_vs_previous %}
+      <tr>
+        <td>Score (0–10)</td>
+        <td class="num">— → {{ c.kpis.score_10 }}</td>
+        <td class="num delta-zero">—</td>
+      </tr>
+      <tr>
+        <td>Win-rate</td>
+        <td class="num">{{ (c.kpis.win_rate - d.win_rate_delta)|round(2) }}% → {{ c.kpis.win_rate }}%</td>
+        <td class="num {% if d.win_rate_delta > 0 %}delta-pos{% elif d.win_rate_delta < 0 %}delta-neg{% else %}delta-zero{% endif %}">
+          {{ "+" if d.win_rate_delta > 0 else "" }}{{ d.win_rate_delta }}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="section">
+  <h2>12. Programa de treino de puzzles</h2>
+  {{ puzzle_program_block(c.puzzle_program, s.section_puzzle_program) }}
+</div>
+
+<div class="section">
+  <h2>13. Partidas-chave (5 melhores vitórias + 5 piores derrotas)</h2>
+  {{ references_list(c.references) }}
+</div>
+
+</body>
+</html>

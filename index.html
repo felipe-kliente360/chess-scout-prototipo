@@ -1,0 +1,1120 @@
+<!DOCTYPE html>
+
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chess Exporter — miguelrov</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      background: #0d0d0d;
+      font-family: 'Courier New', monospace;
+      color: #e8e0cc;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+    }
+    .header { text-align: center; margin-bottom: 40px; }
+    .header .icon { font-size: 48px; margin-bottom: 8px; }
+    .header h1 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: #f0c040;
+    }
+    .header p { color: #888; margin-top: 8px; font-size: 13px; letter-spacing: 2px; }
+    .dashboard {
+      width: 100%;
+      max-width: 1280px;
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 1100px) {
+      .dashboard { grid-template-columns: 1fr; }
+    }
+    .panel {
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .panel.right { min-height: 600px; }
+    .terminal-label {
+      background: #111;
+      border-bottom: 1px solid #222;
+      padding: 12px 16px;
+      font-size: 11px;
+      color: #555;
+      letter-spacing: 1px;
+    }
+    #log {
+      flex: 1;
+      min-height: 540px;
+      max-height: calc(100vh - 200px);
+      overflow-y: auto;
+      padding: 16px;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .log-idle { color: #444; }
+    .log-ok { color: #6fcf6f; }
+    .log-warn { color: #e0a030; }
+    .log-err { color: #e05555; }
+    .log-normal { color: #b0a888; }
+    .cursor { color: #f0c040; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0} }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-top: 1px solid #222;
+      border-bottom: 1px solid #222;
+    }
+    .stat {
+      text-align: center;
+      padding: 14px 8px;
+      border-right: 1px solid #222;
+    }
+    .stat:last-child { border-right: none; }
+    .stat-value { font-size: 22px; font-weight: 700; }
+    .stat-label { font-size: 10px; color: #555; letter-spacing: 1px; margin-top: 4px; }
+    .actions { padding: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .config {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      padding: 16px;
+      border-bottom: 1px solid #222;
+      background: #0f0f0f;
+    }
+    .config label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 10px;
+      color: #555;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .config input, .config select {
+      background: #0a0a0a;
+      border: 1px solid #2a2a2a;
+      color: #f0c040;
+      padding: 8px 10px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      border-radius: 3px;
+      outline: none;
+    }
+    .config input:focus, .config select:focus { border-color: #f0c040; }
+    .time-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; padding: 4px 0; }
+    .time-filters .tf {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: #b0a888; text-transform: none;
+      letter-spacing: 0; padding: 0; cursor: pointer; user-select: none;
+    }
+    .time-filters .tf input { accent-color: #f0c040; cursor: pointer; }
+    #estimate {
+      padding: 12px 16px;
+      border-bottom: 1px solid #222;
+      font-size: 12px;
+      color: #888;
+      background: #0f0f0f;
+      line-height: 1.5;
+    }
+    button {
+      padding: 11px 8px;
+      border: none;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: all 0.2s;
+    }
+    #btn-fetch {
+      background: #f0c040;
+      color: #0d0d0d;
+    }
+    #btn-fetch:disabled {
+      background: #1a1a1a;
+      color: #444;
+      cursor: not-allowed;
+    }
+    #btn-download {
+      display: none;
+      background: transparent;
+      color: #6fcf6f;
+      border: 1px solid #6fcf6f !important;
+    }
+    #btn-analyze {
+      display: none;
+      background: transparent;
+      color: #4fc3f7;
+      border: 1px solid #4fc3f7 !important;
+    }
+    #btn-analyze:disabled { opacity: 0.5; cursor: not-allowed; }
+    #btn-download-analysis {
+      display: none;
+      background: transparent;
+      color: #c084fc;
+      border: 1px solid #c084fc !important;
+    }
+    #btn-reset { background: transparent; color: #888; border: 1px solid #444 !important; }
+    #btn-download-diag { background: transparent; color: #888; border: 1px solid #444 !important; font-size: 10px; }
+    .preview { width: 100%; max-width: 1280px; margin-top: 24px; }
+    .preview-label { font-size: 11px; color: #555; letter-spacing: 2px; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th {
+      padding: 8px 12px;
+      text-align: left;
+      color: #555;
+      font-weight: 400;
+      letter-spacing: 1px;
+      font-size: 11px;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    td { padding: 10px 12px; border-bottom: 1px solid #1a1a1a; }
+    .win { color: #6fcf6f; }
+    .loss { color: #e05555; }
+    .draw { color: #888; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="icon">♟</div>
+  <h1>Chess Exporter</h1>
+  <p id="subtitle">configure e busque partidas</p>
+</div>
+
+<div class="dashboard">
+  <div class="panel left">
+    <div class="terminal-label">CONFIGURAÇÃO</div>
+    <div class="config">
+      <label>
+        Username Chess.com
+        <input type="text" id="input-username" value="miguelrov" />
+      </label>
+      <label>
+        Qtd. partidas
+        <input type="number" id="input-target" value="50" min="1" max="500" />
+      </label>
+      <label>
+        Depth Stockfish
+        <input type="number" id="input-depth" value="18" min="1" max="22" />
+      </label>
+      <label>
+        Engine
+        <select id="input-engine">
+          <option value="api">API remota (stockfish.online)</option>
+          <option value="local" selected>Stockfish local (WASM)</option>
+        </select>
+      </label>
+      <label>
+        Formatos
+        <div class="time-filters">
+          <label class="tf"><input type="checkbox" class="tf-cb" value="bullet" checked> bullet</label>
+          <label class="tf"><input type="checkbox" class="tf-cb" value="blitz" checked> blitz</label>
+          <label class="tf"><input type="checkbox" class="tf-cb" value="rapid" checked> rapid</label>
+          <label class="tf"><input type="checkbox" class="tf-cb" value="daily" checked> daily</label>
+        </div>
+      </label>
+    </div>
+
+    <div id="estimate" class="log-idle">⏱ tempo estimado: —</div>
+
+    <div class="stats" id="stats" style="display:none">
+      <div class="stat">
+        <div class="stat-value win" id="stat-wins">0</div>
+        <div class="stat-label">VITÓRIAS</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value loss" id="stat-losses">0</div>
+        <div class="stat-label">DERROTAS</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value draw" id="stat-draws">0</div>
+        <div class="stat-label">EMPATES</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="btn-fetch" onclick="fetchGames()" style="grid-column: span 2;">Buscar Partidas</button>
+      <button id="btn-analyze" onclick="analyzeGames()" style="grid-column: span 2;">⚙ Analisar Stockfish</button>
+      <button id="btn-download" onclick="downloadCSV()">↓ CSV Partidas</button>
+      <button id="btn-download-analysis" onclick="downloadAnalysisCSV()">↓ CSV Análise</button>
+      <button id="btn-download-diag" onclick="downloadDiagnostics()">↓ Diag API</button>
+      <button id="btn-reset" onclick="resetSession()">🔄 Nova Análise</button>
+    </div>
+  </div>
+
+  <div class="panel right">
+    <div class="terminal-label">TERMINAL OUTPUT</div>
+    <div id="log"><span class="log-idle">Aguardando início...</span></div>
+  </div>
+</div>
+
+<div class="preview" id="preview" style="display:none">
+  <div class="preview-label">PRÉVIA — 5 PARTIDAS MAIS RECENTES</div>
+  <div style="overflow-x:auto">
+    <table>
+      <thead>
+        <tr>
+          <th>DATA</th><th>COR</th><th>ADVERSÁRIO</th>
+          <th>RATING</th><th>RESULTADO</th><th>TEMPO</th>
+        </tr>
+      </thead>
+      <tbody id="preview-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script>
+  const STOCKFISH_API = "https://stockfish.online/api/s/v2.php";
+  const STOCKFISH_WASM_URLS = [
+    "https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js",
+    "https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js",
+    "https://unpkg.com/stockfish.js@10.0.2/stockfish.js",
+  ];
+  let USERNAME = "miguelrov";
+  let TARGET = 50;
+  let STOCKFISH_DEPTH = 18;
+  let ENGINE = "local";
+  let TIME_CLASSES = new Set(["bullet", "blitz", "rapid", "daily"]);
+  let allGames = [];
+  let allAnalysis = [];
+
+  function readConfig() {
+    const u = document.getElementById("input-username").value.trim();
+    const t = parseInt(document.getElementById("input-target").value, 10);
+    const d = parseInt(document.getElementById("input-depth").value, 10);
+    const eng = document.getElementById("input-engine").value;
+    const selectedTC = Array.from(document.querySelectorAll(".tf-cb:checked")).map(cb => cb.value);
+    if (!u) throw new Error("Username vazio.");
+    if (!t || t < 1) throw new Error("Quantidade inválida.");
+    if (!d || d < 1 || d > 20) throw new Error("Depth deve estar entre 1 e 20.");
+    if (!selectedTC.length) throw new Error("Selecione pelo menos um formato (bullet, blitz, rapid ou daily).");
+    USERNAME = u;
+    TARGET = t;
+    STOCKFISH_DEPTH = d;
+    ENGINE = eng === "local" ? "local" : "api";
+    TIME_CLASSES = new Set(selectedTC);
+    document.getElementById("subtitle").textContent = `${USERNAME} · ${TARGET} partidas · depth ${STOCKFISH_DEPTH} · ${selectedTC.join("+")} · ${ENGINE}`;
+  }
+
+  const AVG_PLIES_PER_GAME = 60;
+  function estimateAnalysisSeconds(games, depth, engine = "api", avgPlies = AVG_PLIES_PER_GAME) {
+    const positions = games * avgPlies;
+    if (engine === "local") {
+      // WASM single-thread: ~0.05s a d10, escala ~1.5^(d-10)
+      const secPerPos = 0.05 * Math.pow(1.5, Math.max(0, depth - 10)) + 0.02;
+      return positions * secPerPos;
+    }
+    const secPerPos = 0.25 + 0.06 * Math.pow(1.18, Math.max(0, depth - 8));
+    return positions * secPerPos;
+  }
+  function formatDuration(s) {
+    if (!isFinite(s) || s <= 0) return "—";
+    if (s < 60) return `${Math.round(s)}s`;
+    const m = Math.floor(s / 60), sec = Math.round(s % 60);
+    if (m < 60) return sec ? `${m}m ${sec}s` : `${m}m`;
+    const h = Math.floor(m / 60), rm = m % 60;
+    return rm ? `${h}h ${rm}m` : `${h}h`;
+  }
+  function updateEstimate() {
+    const t = parseInt(document.getElementById("input-target").value, 10);
+    const d = parseInt(document.getElementById("input-depth").value, 10);
+    const eng = document.getElementById("input-engine").value;
+    const el = document.getElementById("estimate");
+    if (!t || !d || t < 1 || d < 1) { el.textContent = "⏱ tempo estimado de análise: —"; return; }
+    const games = allGames.length || t;
+    const sec = estimateAnalysisSeconds(games, d, eng);
+    const lo = formatDuration(sec * 0.7), hi = formatDuration(sec * 1.4);
+    const basis = allGames.length ? `${games} partidas reais` : `~${games} partidas (alvo)`;
+    const engLabel = eng === "local" ? "Stockfish local" : "API remota";
+    el.textContent = `⏱ ${engLabel} (${basis}, depth ${d}, ~${AVG_PLIES_PER_GAME} lances/partida): ${lo} – ${hi}`;
+  }
+  document.addEventListener("DOMContentLoaded", () => {
+    ["input-target", "input-depth", "input-engine"].forEach(id =>
+      document.getElementById(id).addEventListener("input", updateEstimate));
+    document.getElementById("input-engine").addEventListener("change", updateEstimate);
+    updateEstimate();
+  });
+
+  function log(msg, cls = "log-normal") {
+    const div = document.getElementById("log");
+    const cursor = div.querySelector(".cursor");
+    if (cursor) cursor.remove();
+    const span = document.createElement("div");
+    span.className = cls;
+    span.textContent = msg;
+    div.appendChild(span);
+    div.scrollTop = div.scrollHeight;
+  }
+
+  function showCursor() {
+    const div = document.getElementById("log");
+    const span = document.createElement("span");
+    span.className = "cursor";
+    span.textContent = "▌";
+    div.appendChild(span);
+    div.scrollTop = div.scrollHeight;
+  }
+
+  function removeCursor() {
+    const c = document.querySelector(".cursor");
+    if (c) c.remove();
+  }
+
+  function parseGames(games) {
+    return games.map(g => {
+      const isWhite = g.white?.username?.toLowerCase() === USERNAME.toLowerCase();
+      const me = isWhite ? g.white : g.black;
+      const opp = isWhite ? g.black : g.white;
+      const result = me?.result === "win" ? "Win" : opp?.result === "win" ? "Loss" : "Draw";
+      const termination = (me?.result === "win" ? opp?.result : me?.result) || "";
+      const date = g.end_time ? new Date(g.end_time * 1000).toISOString().split("T")[0] : "";
+      return {
+        date,
+        color: isWhite ? "White" : "Black",
+        opponent: opp?.username || "",
+        opponent_rating: opp?.rating || "",
+        my_rating: me?.rating || "",
+        result,
+        termination,
+        time_control: g.time_control || "",
+        time_class: g.time_class || "",
+        opening: g.opening || "",
+        eco: "",
+        eco_ply: "",
+        eco_family: "",
+        url: g.url || "",
+        pgn: g.pgn || "",
+      };
+    });
+  }
+
+  function applyOpeningClassification(games) {
+    let hits = 0;
+    for (const g of games) {
+      const cls = classifyOpening(g.pgn);
+      if (!cls) continue;
+      g.eco = cls.eco;
+      g.opening = `${cls.eco} ${cls.name}`;
+      g.eco_ply = cls.eco_ply;
+      g.eco_family = cls.name.split(":")[0].trim();
+      hits++;
+    }
+    return hits;
+  }
+
+  function toCSV(rows) {
+    if (!rows.length) return "";
+    const headers = Object.keys(rows[0]);
+    const escape = v => `"${String(v).replace(/"/g, '""')}"`;
+    return [headers.join(","), ...rows.map(r => headers.map(h => escape(r[h])).join(","))].join("\n");
+  }
+
+  function resetSession() {
+    document.getElementById("log").innerHTML = '<span class="log-idle">Aguardando início...</span>';
+    document.getElementById("stats").style.display = "none";
+    document.getElementById("preview").style.display = "none";
+    document.getElementById("btn-download").style.display = "";
+    document.getElementById("btn-download-analysis").style.display = "";
+    allGames = [];
+    allAnalysis = [];
+    terminateStockfish();
+    updateEstimate();
+  }
+
+  async function fetchGames() {
+    const btn = document.getElementById("btn-fetch");
+    try { readConfig(); } catch (e) { alert(e.message); return; }
+    btn.disabled = true;
+    btn.textContent = "Buscando...";
+    document.getElementById("stats").style.display = "none";
+    document.getElementById("preview").style.display = "none";
+    document.getElementById("btn-download").style.display = "none";
+    allGames = [];
+    log("─".repeat(40), "log-idle");
+    log(`▶ Nova busca: ${USERNAME} · ${TARGET} partidas · depth ${STOCKFISH_DEPTH}`);
+
+    try {
+      log("Carregando base ECO (Lichess)...");
+      await loadEcoIndex();
+      log(`  ✓ ${Object.keys(ecoIndex).length} posições de abertura indexadas.`);
+
+      log("Buscando arquivos de partidas...");
+      showCursor();
+
+      const archRes = await fetch(`https://api.chess.com/pub/player/${USERNAME}/games/archives`, {
+        headers: { "User-Agent": "chess-export/1.0" }
+      });
+      if (!archRes.ok) throw new Error(`Erro ao buscar arquivos: ${archRes.status}`);
+      const { archives } = await archRes.json();
+      if (!archives?.length) throw new Error("Nenhum arquivo encontrado.");
+
+      log(`${archives.length} meses encontrados. Coletando partidas...`);
+
+      const collected = [];
+      for (let i = archives.length - 1; i >= 0 && collected.length < TARGET; i--) {
+        const url = archives[i];
+        const month = url.split("/").slice(-2).join("/");
+        log(`Lendo ${month}...`);
+        showCursor();
+
+        const res = await fetch(url, {
+          headers: { "User-Agent": "chess-export/1.0" }
+        });
+        if (!res.ok) { log(`  ⚠ Erro em ${month}, pulando.`, "log-warn"); continue; }
+        const { games } = await res.json();
+        if (!games?.length) continue;
+        const parsed = parseGames(games);
+        const byTimeClass = parsed.filter(g => TIME_CLASSES.has(g.time_class));
+        const skippedTime = parsed.length - byTimeClass.length;
+        const filtered = byTimeClass.filter(g => countPlies(g.pgn) >= MIN_PLIES);
+        const skippedShort = byTimeClass.length - filtered.length;
+        const skippedNote = [
+          skippedTime ? `${skippedTime} fora dos filtros de ritmo` : "",
+          skippedShort ? `${skippedShort} com <${MIN_PLIES} lances` : "",
+        ].filter(Boolean).join(", ");
+        collected.unshift(...filtered);
+        log(`  ✓ ${filtered.length} partidas${skippedNote ? ` (${skippedNote})` : ""} · total: ${Math.min(collected.length, TARGET)}`);
+      }
+
+      allGames = collected.slice(-TARGET);
+      removeCursor();
+      const ecoHits = applyOpeningClassification(allGames);
+      const pct = allGames.length ? Math.round((ecoHits / allGames.length) * 100) : 0;
+      log(`📚 Aberturas classificadas via ECO: ${ecoHits}/${allGames.length} (${pct}%).`);
+      log(`✅ Pronto! ${allGames.length} partidas coletadas.`, "log-ok");
+      updateEstimate();
+
+      // Stats
+      const wins = allGames.filter(g => g.result === "Win").length;
+      const losses = allGames.filter(g => g.result === "Loss").length;
+      const draws = allGames.filter(g => g.result === "Draw").length;
+      document.getElementById("stat-wins").textContent = wins;
+      document.getElementById("stat-losses").textContent = losses;
+      document.getElementById("stat-draws").textContent = draws;
+      document.getElementById("stats").style.display = "flex";
+
+      // Preview
+      const tbody = document.getElementById("preview-body");
+      tbody.innerHTML = "";
+      allGames.slice(-5).reverse().forEach(g => {
+        const tr = document.createElement("tr");
+        const resultClass = g.result === "Win" ? "win" : g.result === "Loss" ? "loss" : "draw";
+        const resultText = g.result === "Win" ? "✓ Vitória" : g.result === "Loss" ? "✗ Derrota" : "= Empate";
+        const colorIcon = g.color === "White" ? "⬜ Brancas" : "⬛ Pretas";
+        tr.innerHTML = `
+          <td style="color:#888">${g.date}</td>
+          <td>${colorIcon}</td>
+          <td>${g.opponent}</td>
+          <td style="color:#888">${g.opponent_rating}</td>
+          <td class="${resultClass}">${resultText}</td>
+          <td style="color:#888">${g.time_class}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+      document.getElementById("preview").style.display = "block";
+      document.getElementById("btn-download").style.display = "block";
+      document.getElementById("btn-analyze").style.display = "block";
+
+    } catch (e) {
+      removeCursor();
+      log("❌ " + e.message, "log-err");
+    }
+
+    btn.disabled = false;
+    btn.textContent = "Buscar Partidas";
+  }
+
+  function timestamp() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  }
+
+  function downloadCSV() {
+    const csv = toCSV(allGames);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const stamp = timestamp();
+    a.download = `${USERNAME}_${stamp}_games_${allGames.length}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function normalizePGN(pgn) {
+    if (!pgn) return "";
+    let s = String(pgn).replace(/\r\n?/g, "\n");
+    if (!s.includes("\n")) {
+      s = s.replace(/\]\s*\[/g, "]\n[").replace(/\]\s*(?=1\.)/, "]\n\n");
+    }
+    return s;
+  }
+
+  const MIN_PLIES = 15;
+  const ECO_MAX_PLIES = 25;
+  const ECO_INDEX_URL = "data/openings/eco.json";
+  const POSITION_CACHE_URL = "data/openings/position_cache.json";
+  let ecoIndex = null;
+  let positionCache = null;
+  let cacheStats = { hits: 0, misses: 0 };
+
+  async function loadPositionCache() {
+    if (positionCache !== null) return positionCache;
+    try {
+      const res = await fetch(POSITION_CACHE_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      positionCache = await res.json();
+      return positionCache;
+    } catch (e) {
+      log(`  ⚠ Cache de posições não disponível (${e.message}). Análise vai rodar tudo do zero.`, "log-warn");
+      positionCache = {};
+      return positionCache;
+    }
+  }
+
+  function fenCacheKey(fen) {
+    return (fen || "").split(" ").slice(0, 3).join(" ");
+  }
+
+  function getCachedAnalysis(fen, minDepth) {
+    if (!positionCache) return null;
+    const hit = positionCache[fenCacheKey(fen)];
+    if (hit && hit.depth >= minDepth) return hit;
+    return null;
+  }
+
+  async function loadEcoIndex() {
+    if (ecoIndex) return ecoIndex;
+    try {
+      const res = await fetch(ECO_INDEX_URL);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      ecoIndex = await res.json();
+      return ecoIndex;
+    } catch (e) {
+      log(`  ⚠ Não foi possível carregar ${ECO_INDEX_URL} (${e.message}). Aberturas ficarão sem ECO.`, "log-warn");
+      ecoIndex = {};
+      return ecoIndex;
+    }
+  }
+
+  function fenToEpd(fen) {
+    return fen.split(" ").slice(0, 3).join(" ");
+  }
+
+  function classifyOpening(pgn) {
+    if (!pgn || !ecoIndex) return null;
+    const chess = new Chess();
+    if (!chess.load_pgn(normalizePGN(pgn), { sloppy: true })) return null;
+    const history = chess.history({ verbose: true });
+    const replay = new Chess();
+    let best = null;
+    const limit = Math.min(history.length, ECO_MAX_PLIES);
+    for (let i = 0; i < limit; i++) {
+      replay.move(history[i]);
+      const epd = fenToEpd(replay.fen());
+      const hit = ecoIndex[epd];
+      if (hit) best = { ...hit, eco_ply: i + 1 };
+    }
+    return best;
+  }
+
+  function countPlies(pgn) {
+    if (!pgn) return 0;
+    const chess = new Chess();
+    if (!chess.load_pgn(normalizePGN(pgn), { sloppy: true })) return 0;
+    return chess.history().length;
+  }
+
+  function extractMovesFromPGN(pgn) {
+    const chess = new Chess();
+    const normalized = normalizePGN(pgn);
+    if (!chess.load_pgn(normalized, { sloppy: true })) return null;
+    const history = chess.history({ verbose: true });
+    const replay = new Chess();
+    const positions = [{ ply: 0, fen_before: replay.fen(), move_san: "", move_uci: "", color: "" }];
+    history.forEach((mv, i) => {
+      const fenBefore = replay.fen();
+      replay.move(mv);
+      positions.push({
+        ply: i + 1,
+        fen_before: fenBefore,
+        fen_after: replay.fen(),
+        move_san: mv.san,
+        move_uci: mv.from + mv.to + (mv.promotion || ""),
+        color: mv.color === "w" ? "White" : "Black",
+      });
+    });
+    return positions.slice(1);
+  }
+
+  let apiDiagnostics = null;
+  function recordApiCall(record) {
+    if (!apiDiagnostics) return;
+    apiDiagnostics.calls.push(record);
+    if (record.ok) apiDiagnostics.ok++;
+    else {
+      apiDiagnostics.failed++;
+      const key = record.errorKind || "unknown";
+      apiDiagnostics.byKind[key] = (apiDiagnostics.byKind[key] || 0) + 1;
+    }
+    if (record.latencyMs != null) apiDiagnostics.latencies.push(record.latencyMs);
+  }
+  function classifyError(msg) {
+    if (!msg) return "unknown";
+    if (/HTTP 429|rate/i.test(msg)) return "rate_limit_429";
+    if (/HTTP 5\d\d/i.test(msg)) return "server_5xx";
+    if (/HTTP 4\d\d/i.test(msg)) return "client_4xx";
+    if (/Failed to fetch|NetworkError|network|TypeError/i.test(msg)) return "network";
+    if (/timeout|aborted/i.test(msg)) return "timeout";
+    if (/JSON|Unexpected token/i.test(msg)) return "bad_json";
+    return msg.slice(0, 60);
+  }
+
+  function printApiDiagnostics() {
+    if (!apiDiagnostics) return;
+    const d = apiDiagnostics;
+    const total = d.calls.length;
+    if (!total) return;
+    const lats = d.latencies.slice().sort((a, b) => a - b);
+    const pct = p => lats.length ? Math.round(lats[Math.min(lats.length - 1, Math.floor(p * lats.length))]) : 0;
+    log("─── 🔬 Diagnóstico API Stockfish ───", "log-normal");
+    log(`  requisições: ${total} | ok: ${d.ok} | falhas: ${d.failed} (${(100 * d.failed / total).toFixed(1)}%)`);
+    log(`  latência (ok): p50 ${pct(0.5)}ms · p90 ${pct(0.9)}ms · p99 ${pct(0.99)}ms · max ${pct(0.9999)}ms`);
+    if (d.failed) {
+      log("  falhas por tipo:");
+      Object.entries(d.byKind).sort((a, b) => b[1] - a[1])
+        .forEach(([k, v]) => log(`    · ${k}: ${v}`, "log-warn"));
+      // Sample 3 failed calls for inspection
+      const failed = d.calls.filter(c => !c.ok && c.final);
+      const sample = failed.slice(0, 3);
+      if (sample.length) {
+        log("  exemplos de falhas (3 primeiras):");
+        sample.forEach((c, i) => log(`    [${i + 1}] ${c.errorKind} · "${(c.errorMsg || '').slice(0, 80)}" · fen=${c.fen.slice(0, 40)}…`, "log-warn"));
+      }
+      // Detect bursts (consecutive failures within 2s)
+      let bursts = 0, currentBurst = 0, maxBurst = 0;
+      for (const c of d.calls) {
+        if (!c.ok) { currentBurst++; if (currentBurst > maxBurst) maxBurst = currentBurst; }
+        else { if (currentBurst >= 3) bursts++; currentBurst = 0; }
+      }
+      if (currentBurst >= 3) bursts++;
+      log(`  rajadas de erro consecutivo (≥3): ${bursts} | maior rajada: ${maxBurst}`, bursts ? "log-warn" : "log-normal");
+      log(`  💡 Use o botão "↓ Diagnóstico API" para baixar log JSON completo.`, "log-normal");
+    }
+    log("──────────────────────────────────", "log-normal");
+  }
+
+  function downloadDiagnostics() {
+    if (!apiDiagnostics || !apiDiagnostics.calls.length) {
+      alert("Nenhum diagnóstico disponível. Rode uma análise primeiro.");
+      return;
+    }
+    const payload = {
+      username: USERNAME,
+      depth: STOCKFISH_DEPTH,
+      stockfish_api: STOCKFISH_API,
+      summary: {
+        total: apiDiagnostics.calls.length,
+        ok: apiDiagnostics.ok,
+        failed: apiDiagnostics.failed,
+        by_kind: apiDiagnostics.byKind,
+        started_at: new Date(apiDiagnostics.startedAt).toISOString(),
+      },
+      calls: apiDiagnostics.calls,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${USERNAME}_${timestamp()}_apidiag_d${STOCKFISH_DEPTH}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  const ANALYZE_TIMEOUT_MS = 15000;
+  const ANALYZE_THROTTLE_MS = 50;
+  const MAX_RETRIES_DEFAULT = 4;
+
+  // ── Stockfish WASM local ──────────────────────────────────────────
+  let SFWorker = null;
+  let SFInitPromise = null;
+
+  async function fetchStockfishScript() {
+    const errors = [];
+    for (const url of STOCKFISH_WASM_URLS) {
+      try {
+        log(`  ↻ baixando engine de ${url.split("/")[2]}...`);
+        const res = await fetch(url, { cache: "force-cache" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        if (!text.length) throw new Error("script vazio");
+        log(`  ✓ baixado (${(text.length / 1024).toFixed(0)}KB) de ${url.split("/")[2]}`);
+        return { text, baseUrl: url.replace(/[^/]+$/, "") };
+      } catch (e) {
+        errors.push(`${url.split("/")[2]}: ${e.message}`);
+        log(`  ✗ ${url.split("/")[2]} falhou: ${e.message}`, "log-warn");
+      }
+    }
+    throw new Error("Nenhum CDN de Stockfish acessível. " + errors.join(" | "));
+  }
+
+  function initStockfish() {
+    if (SFInitPromise) return SFInitPromise;
+    SFInitPromise = (async () => {
+      const { text: scriptSrc, baseUrl } = await fetchStockfishScript();
+      log("  ⚙ instanciando worker...");
+      const prelude =
+        `self.Module = self.Module || {};` +
+        `self.Module.locateFile = function(name){ return ${JSON.stringify(baseUrl)} + name; };` +
+        `self.Module.print = function(s){ self.postMessage(s); };` +
+        `self.Module.printErr = function(s){ self.postMessage("ERR " + s); };` +
+        `\n`;
+      const blob = new Blob([prelude + scriptSrc], { type: "application/javascript" });
+      SFWorker = new Worker(URL.createObjectURL(blob));
+
+      return new Promise((resolve, reject) => {
+        let stage = "waiting-uciok";
+        let lastMsgAt = Date.now();
+        const initTimeout = setTimeout(() => {
+          SFWorker.removeEventListener("message", initHandler);
+          const idle = ((Date.now() - lastMsgAt) / 1000).toFixed(1);
+          reject(new Error(`engine não respondeu em 180s (estágio: ${stage}, último msg há ${idle}s)`));
+        }, 180000);
+
+        const initHandler = (e) => {
+          const line = typeof e.data === "string" ? e.data : "";
+          lastMsgAt = Date.now();
+          console.log("[sf]", line);
+          if (line.startsWith("ERR ")) {
+            console.warn("[stockfish stderr]", line.slice(4));
+          }
+          if (line === "uciok") {
+            stage = "waiting-readyok";
+            SFWorker.postMessage("isready");
+          } else if (line === "readyok") {
+            clearTimeout(initTimeout);
+            SFWorker.removeEventListener("message", initHandler);
+            resolve();
+          }
+        };
+        SFWorker.addEventListener("message", initHandler);
+        SFWorker.onerror = (err) => {
+          clearTimeout(initTimeout);
+          console.error("[sf onerror]", err);
+          reject(new Error(err.message || `worker error (estágio: ${stage})`));
+        };
+        SFWorker.postMessage("uci");
+      });
+    })();
+    SFInitPromise.catch(() => { SFInitPromise = null; });
+    return SFInitPromise;
+  }
+
+  function terminateStockfish() {
+    if (SFWorker) { try { SFWorker.terminate(); } catch (_) {} }
+    SFWorker = null;
+    SFInitPromise = null;
+  }
+
+  // Aguarda 'readyok' do engine — handshake UCI obrigatório entre comandos para
+  // garantir que estado anterior foi totalmente limpo antes do novo position/go.
+  function waitReadyOk(timeoutMs = 5000) {
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => {
+        SFWorker.removeEventListener("message", handler);
+        reject(new Error("isready timeout"));
+      }, timeoutMs);
+      const handler = (e) => {
+        if (typeof e.data === "string" && e.data.trim() === "readyok") {
+          clearTimeout(t);
+          SFWorker.removeEventListener("message", handler);
+          resolve();
+        }
+      };
+      SFWorker.addEventListener("message", handler);
+      SFWorker.postMessage("isready");
+    });
+  }
+
+  function isLegalUci(fen, uci) {
+    if (!uci || uci === "(none)" || uci.length < 4) return false;
+    try {
+      const c = new Chess(fen);
+      const m = c.move({
+        from: uci.slice(0, 2),
+        to: uci.slice(2, 4),
+        promotion: uci.length > 4 ? uci.slice(4) : undefined,
+      });
+      return !!m;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function analyzeFENLocal(fen, depth) {
+    await initStockfish();
+    // Sync handshake: stop qualquer busca pendente, reseta state, espera readyok
+    SFWorker.postMessage("stop");
+    SFWorker.postMessage("ucinewgame");
+    await waitReadyOk();
+    return new Promise((resolve, reject) => {
+      const sideToMove = (fen.split(" ")[1] || "w").toLowerCase();
+      let lastInfo = null;
+      const timer = setTimeout(() => {
+        SFWorker.removeEventListener("message", handler);
+        reject(new Error("local engine timeout"));
+      }, ANALYZE_TIMEOUT_MS);
+      const handler = (e) => {
+        const line = typeof e.data === "string" ? e.data : "";
+        if (line.startsWith("info ") && /score (cp|mate)/.test(line)) {
+          lastInfo = line;
+        } else if (line.startsWith("bestmove")) {
+          clearTimeout(timer);
+          SFWorker.removeEventListener("message", handler);
+          let evalPawns = "", mate = "", bestMove = "", continuation = "";
+          const bm = line.match(/bestmove\s+(\S+)/);
+          if (bm && bm[1] !== "(none)" && isLegalUci(fen, bm[1])) {
+            bestMove = bm[1];
+          }
+          if (lastInfo) {
+            const cpMatch = lastInfo.match(/score cp (-?\d+)/);
+            const mateMatch = lastInfo.match(/score mate (-?\d+)/);
+            if (mateMatch) {
+              let m = parseInt(mateMatch[1], 10);
+              if (sideToMove === "b") m = -m;
+              mate = m;
+            } else if (cpMatch) {
+              let cp = parseInt(cpMatch[1], 10);
+              if (sideToMove === "b") cp = -cp;
+              evalPawns = (cp / 100).toFixed(2);
+            }
+            const pvMatch = lastInfo.match(/\spv\s+(.+)$/);
+            if (pvMatch) continuation = pvMatch[1].trim();
+          }
+          resolve({ evaluation: evalPawns, mate, best_move: bestMove, continuation });
+        }
+      };
+      SFWorker.addEventListener("message", handler);
+      SFWorker.postMessage(`position fen ${fen}`);
+      SFWorker.postMessage(`go depth ${depth}`);
+    });
+  }
+  // ──────────────────────────────────────────────────────────────────
+
+  async function analyzeFEN(fen, retries = MAX_RETRIES_DEFAULT) {
+    // Cache hit: pula análise se já temos esta posição em depth suficiente
+    const cached = getCachedAnalysis(fen, STOCKFISH_DEPTH);
+    if (cached) {
+      cacheStats.hits++;
+      return {
+        evaluation: cached.evaluation || "",
+        mate: cached.mate || "",
+        best_move: cached.best_move || "",
+        continuation: "",
+        cached: true,
+      };
+    }
+    cacheStats.misses++;
+    if (ENGINE === "local") {
+      const t0 = performance.now();
+      try {
+        const r = await analyzeFENLocal(fen, STOCKFISH_DEPTH);
+        recordApiCall({ ok: true, attempt: 0, latencyMs: performance.now() - t0, fen, ts: Date.now(), engine: "local" });
+        return r;
+      } catch (e) {
+        recordApiCall({ ok: false, attempt: 0, latencyMs: performance.now() - t0, fen, ts: Date.now(), errorMsg: e.message, errorKind: "local_engine", final: true, engine: "local" });
+        return { evaluation: "", mate: "", best_move: "", error: e.message, error_kind: "local_engine" };
+      }
+    }
+    let lastErr = "";
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const t0 = performance.now();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS);
+      try {
+        const url = `${STOCKFISH_API}?fen=${encodeURIComponent(fen)}&depth=${STOCKFISH_DEPTH}`;
+        const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.data || "API error");
+        let bestMove = "";
+        if (data.bestmove) {
+          const m = data.bestmove.match(/bestmove\s+(\S+)/);
+          const candidate = m ? m[1] : data.bestmove;
+          if (isLegalUci(fen, candidate)) bestMove = candidate;
+        }
+        recordApiCall({ ok: true, attempt, latencyMs: performance.now() - t0, fen, ts: Date.now() });
+        return {
+          evaluation: data.evaluation ?? "",
+          mate: data.mate ?? "",
+          best_move: bestMove,
+          continuation: data.continuation || "",
+        };
+      } catch (e) {
+        const msg = e.name === "AbortError" ? "timeout (15s)" : e.message;
+        lastErr = msg;
+        const kind = classifyError(msg);
+        recordApiCall({ ok: false, attempt, latencyMs: performance.now() - t0, fen, ts: Date.now(), errorMsg: msg, errorKind: kind, final: attempt === retries });
+        if (attempt === retries) return { evaluation: "", mate: "", best_move: "", error: msg, error_kind: kind };
+        // backoff exponencial: 1s, 2s, 4s, 8s — mais agressivo em network/timeout, padrão p/ resto
+        const base = (kind === "network" || kind === "timeout" || kind === "rate_limit_429") ? 1000 : 500;
+        await new Promise(r => setTimeout(r, base * Math.pow(2, attempt)));
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  async function analyzeGames() {
+    if (typeof Chess === "undefined") { log("❌ chess.js não carregou.", "log-err"); return; }
+    if (!allGames.length) { log("⚠ Nenhuma partida para analisar.", "log-warn"); return; }
+    try { readConfig(); } catch (e) { alert(e.message); return; }
+
+    const btn = document.getElementById("btn-analyze");
+    const fetchBtn = document.getElementById("btn-fetch");
+    btn.disabled = true; fetchBtn.disabled = true;
+    btn.textContent = "Analisando...";
+    document.getElementById("btn-download-analysis").style.display = "none";
+    allAnalysis = [];
+
+    let analyzedPositions = 0;
+    let apiErrors = 0;
+    apiDiagnostics = { calls: [], ok: 0, failed: 0, byKind: {}, latencies: [], startedAt: Date.now() };
+
+    try {
+      log(`▶ Iniciando análise Stockfish [${ENGINE === "local" ? "local WASM" : "API remota"}, depth=${STOCKFISH_DEPTH}] em ${allGames.length} partidas...`, "log-normal");
+      cacheStats = { hits: 0, misses: 0 };
+      log("Carregando cache de posições...");
+      await loadPositionCache();
+      log(`  ✓ ${Object.keys(positionCache).length} posições no cache local.`);
+      if (ENGINE === "local") {
+        log("  ⏳ carregando engine WASM (primeira vez baixa ~600KB)...");
+        await initStockfish();
+        log("  ✅ engine pronto.", "log-ok");
+      }
+
+      let totalPositions = 0;
+      const gamesWithMoves = allGames.map((g, idx) => {
+        const moves = extractMovesFromPGN(g.pgn);
+        if (moves) totalPositions += moves.length;
+        return { game: g, gameIndex: idx, moves };
+      });
+
+      log(`Total de posições a analisar: ${totalPositions}`);
+      if (totalPositions === 0) {
+        log("❌ Nenhuma posição extraível dos PGNs. Abortando.", "log-err");
+        return;
+      }
+      showCursor();
+
+      for (const { game, gameIndex, moves } of gamesWithMoves) {
+        if (!moves) {
+          removeCursor();
+          log(`  ⚠ Partida ${gameIndex + 1}: PGN inválido, pulando.`, "log-warn");
+          showCursor();
+          continue;
+        }
+        removeCursor();
+        log(`Partida ${gameIndex + 1}/${allGames.length} — ${game.opponent} (${moves.length} lances)`);
+        showCursor();
+
+        for (const mv of moves) {
+          const analysis = await analyzeFEN(mv.fen_before);
+          if (analysis.error) apiErrors++;
+          analyzedPositions++;
+          if (ENGINE === "api" && ANALYZE_THROTTLE_MS) await new Promise(r => setTimeout(r, ANALYZE_THROTTLE_MS));
+          allAnalysis.push({
+            game_index: gameIndex + 1,
+            game_url: game.url,
+            date: game.date,
+            color: game.color,
+            opponent: game.opponent,
+            ply: mv.ply,
+            move_number: Math.ceil(mv.ply / 2),
+            side_to_move: mv.color,
+            move_san: mv.move_san,
+            move_uci: mv.move_uci,
+            fen_before: mv.fen_before,
+            depth: STOCKFISH_DEPTH,
+            evaluation: analysis.evaluation,
+            mate: analysis.mate,
+            best_move: analysis.best_move,
+            continuation: analysis.continuation || "",
+          });
+
+          if (analyzedPositions % 10 === 0) {
+            removeCursor();
+            log(`  … ${analyzedPositions}/${totalPositions} posições analisadas${apiErrors ? ` (${apiErrors} falhas API)` : ""}`);
+            showCursor();
+          }
+        }
+      }
+
+      removeCursor();
+      const totalForRate = cacheStats.hits + cacheStats.misses;
+      const hitRate = totalForRate ? Math.round(100 * cacheStats.hits / totalForRate) : 0;
+      log(`✅ Análise concluída: ${analyzedPositions} posições${apiErrors ? ` (${apiErrors} com falha API)` : ""}.`, "log-ok");
+      log(`📦 Cache: ${cacheStats.hits} hits / ${cacheStats.misses} misses (${hitRate}% reaproveitado).`, "log-ok");
+      printApiDiagnostics();
+    } catch (e) {
+      removeCursor();
+      console.error(e);
+      log(`❌ Erro na análise: ${e.message}`, "log-err");
+    } finally {
+      btn.disabled = false; fetchBtn.disabled = false;
+      btn.textContent = "⚙ Analisar Stockfish";
+      document.getElementById("btn-download-analysis").style.display = "block";
+
+      if (allAnalysis.length) {
+        try {
+          downloadCSV();
+          await new Promise(r => setTimeout(r, 400));
+          downloadAnalysisCSV();
+          log(`💾 CSVs baixados (games + analysis). Mova-os para data/ e rode a skill chess-report ${USERNAME}.`, "log-ok");
+        } catch (e) {
+          log(`⚠ Download automático falhou (${e.message}). Use os botões "↓ Baixar CSV" e "↓ Baixar Análise".`, "log-warn");
+        }
+      } else {
+        log("⚠ Nenhum resultado para baixar.", "log-warn");
+      }
+    }
+  }
+
+  function downloadAnalysisCSV() {
+    const csv = toCSV(allAnalysis);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const stamp = timestamp();
+    a.download = `${USERNAME}_${stamp}_analysis_d${STOCKFISH_DEPTH}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/compute.py:*)",
+      "Bash(/opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/build.py:*)",
+      "Bash(/opt/homebrew/bin/python3.12 scripts/build_eco_index.py)",
+      "Bash(/opt/homebrew/bin/python3.12 scripts/enrich_eco.py:*)",
+      "Bash(/opt/homebrew/bin/python3.12 scripts/filter_short_games.py:*)"
+    ]
+  }
+}
