@@ -28,5 +28,10 @@ data/openings/position_cache.json
 !data/openings/*.tsv
 !data/openings/eco.json
 
+# Permite o índice tático (4MB, gerado a partir do woodpecker puzzles via
+# scripts/build_tactical_index.py — necessário pro browser classificar temas)
+!data/tactical/
+!data/tactical/themes_index.json
+
 # Settings locais
 .claude/settings.local.json
