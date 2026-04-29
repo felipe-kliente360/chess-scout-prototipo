@@ -205,7 +205,7 @@
         <input type="text" id="input-username" value="miguelrov" />
       </label>
       <label>
-        Qtd. partidas
+        Qtd. partidas <span style="color:#888;font-size:0.85em">(por formato)</span>
         <input type="number" id="input-target" value="50" min="1" max="500" />
       </label>
       <label>
@@ -312,17 +312,52 @@
     document.getElementById("subtitle").textContent = `${USERNAME} · ${TARGET} partidas · depth ${STOCKFISH_DEPTH} · ${selectedTC.join("+")} · ${ENGINE}`;
   }
 
-  const AVG_PLIES_PER_GAME = 60;
-  function estimateAnalysisSeconds(games, depth, engine = "api", avgPlies = AVG_PLIES_PER_GAME) {
-    const positions = games * avgPlies;
+  // Empírico em Mac M-series com stockfish.js single-thread:
+  // d10≈0.10s/pos · d12≈0.20s · d15≈0.80s · d18≈3.0s · d20≈8.0s · d22≈25s
+  // Modelo: overhead fixo (handshake isready + msg passing) + tempo do engine ~ branching^d
+  function estimateSecondsPerPosition(depth, engine) {
     if (engine === "local") {
-      // WASM single-thread: ~0.05s a d10, escala ~1.5^(d-10)
-      const secPerPos = 0.05 * Math.pow(1.5, Math.max(0, depth - 10)) + 0.02;
-      return positions * secPerPos;
+      const overhead = 0.18;  // isready/readyok + postMessage round-trip
+      const engineSec = 0.05 * Math.pow(1.7, Math.max(0, depth - 10));
+      return overhead + engineSec;
     }
-    const secPerPos = 0.25 + 0.06 * Math.pow(1.18, Math.max(0, depth - 8));
-    return positions * secPerPos;
+    return 0.25 + 0.06 * Math.pow(1.18, Math.max(0, depth - 8));
   }
+
+  function avgPliesFromGames() {
+    if (!allGames.length) return 80;  // estimativa default (era 60, calibrado pra mais)
+    let sum = 0, n = 0;
+    for (const g of allGames) {
+      const p = countPlies(g.pgn);
+      if (p > 0) { sum += p; n++; }
+    }
+    return n ? Math.round(sum / n) : 80;
+  }
+
+  function expectedTotalPositions() {
+    if (allGames.length) {
+      return allGames.reduce((acc, g) => acc + countPlies(g.pgn), 0);
+    }
+    const nClasses = TIME_CLASSES.size || 1;
+    return TARGET * nClasses * 80;  // alvo = TARGET por formato * nFormatos * 80 plies
+  }
+
+  function expectedCacheHitRate() {
+    if (!positionCache || !allGames.length) return 0;
+    const sample = Math.min(8, allGames.length);
+    let positions = 0, hits = 0;
+    for (let i = 0; i < sample; i++) {
+      const g = allGames[i];
+      const moves = extractMovesFromPGN(g.pgn);
+      if (!moves) continue;
+      for (const mv of moves) {
+        positions++;
+        if (getCachedAnalysis(mv.fen_before, STOCKFISH_DEPTH)) hits++;
+      }
+    }
+    return positions ? hits / positions : 0;
+  }
+
   function formatDuration(s) {
     if (!isFinite(s) || s <= 0) return "—";
     if (s < 60) return `${Math.round(s)}s`;
@@ -336,18 +371,27 @@
     const d = parseInt(document.getElementById("input-depth").value, 10);
     const eng = document.getElementById("input-engine").value;
     const el = document.getElementById("estimate");
-    if (!t || !d || t < 1 || d < 1) { el.textContent = "⏱ tempo estimado de análise: —"; return; }
-    const games = allGames.length || t;
-    const sec = estimateAnalysisSeconds(games, d, eng);
-    const lo = formatDuration(sec * 0.7), hi = formatDuration(sec * 1.4);
-    const basis = allGames.length ? `${games} partidas reais` : `~${games} partidas (alvo)`;
+    if (!t || !d || t < 1 || d < 1) { el.textContent = "⏱ tempo estimado: —"; return; }
+    const positions = expectedTotalPositions();
+    const hitRate = expectedCacheHitRate();
+    const positionsToAnalyze = Math.round(positions * (1 - hitRate));
+    const secPerPos = estimateSecondsPerPosition(d, eng);
+    const sec = positionsToAnalyze * secPerPos;
+    const lo = formatDuration(sec * 0.85), hi = formatDuration(sec * 1.5);
+    const avgPlies = avgPliesFromGames();
     const engLabel = eng === "local" ? "Stockfish local" : "API remota";
-    el.textContent = `⏱ ${engLabel} (${basis}, depth ${d}, ~${AVG_PLIES_PER_GAME} lances/partida): ${lo} – ${hi}`;
+    const cacheNote = hitRate > 0 ? ` · cache ~${Math.round(hitRate * 100)}%` : "";
+    const basis = allGames.length
+      ? `${allGames.length} partidas (${avgPlies} lances/partida em média, ${positions} posições${cacheNote})`
+      : `${TARGET}/formato × ${TIME_CLASSES.size} = ~${TARGET * TIME_CLASSES.size} partidas, ~${positions} posições`;
+    el.textContent = `⏱ ${engLabel} d${d} (${basis}): ${lo} – ${hi}`;
   }
   document.addEventListener("DOMContentLoaded", () => {
     ["input-target", "input-depth", "input-engine"].forEach(id =>
-      document.getElementById(id).addEventListener("input", updateEstimate));
-    document.getElementById("input-engine").addEventListener("change", updateEstimate);
+      document.getElementById(id).addEventListener("input", () => { try { readConfig(); } catch (_) {} updateEstimate(); }));
+    document.getElementById("input-engine").addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); });
+    document.querySelectorAll(".tf-cb").forEach(cb =>
+      cb.addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); }));
     updateEstimate();
   });
 
@@ -447,7 +491,7 @@
     document.getElementById("btn-download").style.display = "none";
     allGames = [];
     log("─".repeat(40), "log-idle");
-    log(`▶ Nova busca: ${USERNAME} · ${TARGET} partidas · depth ${STOCKFISH_DEPTH}`);
+    log(`▶ Nova busca: ${USERNAME} · ${TARGET} partidas/formato (${[...TIME_CLASSES].join("+")}) · depth ${STOCKFISH_DEPTH}`);
 
     try {
       log("Carregando base ECO (Lichess)...");
@@ -466,11 +510,18 @@
 
       log(`${archives.length} meses encontrados. Coletando partidas...`);
 
+      // Contadores por formato — TARGET é POR formato, não global
+      const counters = {};
+      TIME_CLASSES.forEach(tc => counters[tc] = 0);
+      const allTargetsMet = () => [...TIME_CLASSES].every(tc => counters[tc] >= TARGET);
+      const fmtCounters = () => [...TIME_CLASSES].map(tc => `${tc}:${counters[tc]}/${TARGET}`).join(" ");
+
       const collected = [];
-      for (let i = archives.length - 1; i >= 0 && collected.length < TARGET; i--) {
+      for (let i = archives.length - 1; i >= 0; i--) {
+        if (allTargetsMet()) break;
         const url = archives[i];
         const month = url.split("/").slice(-2).join("/");
-        log(`Lendo ${month}...`);
+        log(`Lendo ${month}... (${fmtCounters()})`);
         showCursor();
 
         const res = await fetch(url, {
@@ -480,23 +531,34 @@
         const { games } = await res.json();
         if (!games?.length) continue;
         const parsed = parseGames(games);
-        const byTimeClass = parsed.filter(g => TIME_CLASSES.has(g.time_class));
-        const skippedTime = parsed.length - byTimeClass.length;
-        const filtered = byTimeClass.filter(g => countPlies(g.pgn) >= MIN_PLIES);
-        const skippedShort = byTimeClass.length - filtered.length;
-        const skippedNote = [
-          skippedTime ? `${skippedTime} fora dos filtros de ritmo` : "",
-          skippedShort ? `${skippedShort} com <${MIN_PLIES} lances` : "",
+        let added = 0, skippedTime = 0, skippedShort = 0, skippedFull = 0;
+        // Itera newest→oldest dentro do mês (Chess.com retorna oldest-first)
+        for (let j = parsed.length - 1; j >= 0; j--) {
+          const g = parsed[j];
+          const tc = g.time_class;
+          if (!TIME_CLASSES.has(tc)) { skippedTime++; continue; }
+          if (counters[tc] >= TARGET) { skippedFull++; continue; }
+          if (countPlies(g.pgn) < MIN_PLIES) { skippedShort++; continue; }
+          collected.push(g);
+          counters[tc]++;
+          added++;
+        }
+        const notes = [
+          skippedTime ? `${skippedTime} ritmo` : "",
+          skippedShort ? `${skippedShort} <${MIN_PLIES} lances` : "",
+          skippedFull ? `${skippedFull} cota cheia` : "",
         ].filter(Boolean).join(", ");
-        collected.unshift(...filtered);
-        log(`  ✓ ${filtered.length} partidas${skippedNote ? ` (${skippedNote})` : ""} · total: ${Math.min(collected.length, TARGET)}`);
+        log(`  ✓ ${added} adicionadas${notes ? ` (descartadas: ${notes})` : ""} · ${fmtCounters()}`);
       }
-
-      allGames = collected.slice(-TARGET);
+      // Coletado newest-first; inverte para chronological (oldest-first)
+      collected.reverse();
+      allGames = collected;
       removeCursor();
       const ecoHits = applyOpeningClassification(allGames);
       const pct = allGames.length ? Math.round((ecoHits / allGames.length) * 100) : 0;
       log(`📚 Aberturas classificadas via ECO: ${ecoHits}/${allGames.length} (${pct}%).`);
+      // Pré-carrega o cache para que a estimativa já reflita hit-rate
+      await loadPositionCache();
       log(`✅ Pronto! ${allGames.length} partidas coletadas.`, "log-ok");
       updateEstimate();
 
