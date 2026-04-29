@@ -123,6 +123,24 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 **Como:** Service worker que mantém `position_cache` em IndexedDB; sync periódico com SQLite via download/upload manual.
 **Custo:** 1 dia. Trade-off: hoje o `serve.py` é stdlib e simples; PWA adiciona complexidade.
 
+### 11. Skills `/app-start` e `/app-stop` (lifecycle do app)
+**Por quê:** hoje o usuário precisa lembrar de rodar `python3.12 scripts/serve.py` em terminal separado e matar o processo no fim. Friction real, esquecimento garante. Quando o app crescer (worker de análise, fila, etc.), serão múltiplos processos pra orquestrar.
+**Como:** Duas skills/slash-commands:
+- `/app-start` — sobe `serve.py` em background, valida que API responde em http://127.0.0.1:8000/api/health, abre o navegador na URL, salva PIDs em `.app-state.json` para o stop saber o que matar. Idempotente: se já está rodando, só reusa.
+- `/app-stop` — lê `.app-state.json`, mata todos os processos registrados, limpa o arquivo. Imprime resumo do que foi parado.
+Conforme o app ganha mais processos (worker Stockfish nativo do item 1, agendador de retentativas, etc.), eles entram automaticamente nesse lifecycle. Skill conhece a topologia; usuário não precisa saber.
+**Custo:** 3h pra MVP (só serve.py); +2h por processo extra que entrar.
+
+### 12. Centralizar output em `data-reports/` e limpar arquivos de apoio
+**Por quê:** hoje cada `compute.py` + `build.py` produz uma cerimônia de arquivos: `data/<user>_<stamp>_computed.json` na raiz, `_sections.json`, depois `build.py` move tudo pra `data/<user>/<user>_<stamp>_<perspective>_report/` que vira pasta separada por relatório. Vira ruído, dificulta achar o PDF, e os artefatos intermediários (JSON, sections) raramente são consultados depois.
+**Como:**
+- Pasta única `data-reports/` com **só os PDFs**: `data-reports/<username>_<perspective>_<stamp>.pdf`
+- Ao final de `build.py`: gera o PDF lá, e **deleta** os artefatos de apoio (computed.json, sections.json, CSV se houver). O `analyses` table no SQLite já guarda o `computed_json` completo se precisar reprocessar.
+- Pasta `data/<user>/` legada: deletada (subdir hoje só serve pra arquivar pares de relatório, redundante com `analyses` table).
+- Quando reprocessar com template novo for necessário (caso futuro), recuperar o `computed_json` do SQLite e re-redigir as sections.
+**Trade-off**: perde a capacidade de "diff" entre dois sections.json antigos sem reprocessar. Mas o redator é determinístico relativo ao computed; raramente vale.
+**Custo:** 2h.
+
 ---
 
 ## ❓ Decisões estratégicas em aberto
