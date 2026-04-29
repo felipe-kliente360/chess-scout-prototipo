@@ -140,6 +140,10 @@ Para todo lance com `loss_cp ≥ 50`:
 
 Não há sobreposição — registram juntos. Se o redator quer "stockfish + tema + facts" no mesmo `key_position`, todos os 3 estão lá.
 
+### Camada 4 — análise de tempo (relógio)
+
+Todo lance carrega `clock_ms` (relógio remanescente após o lance, do `[%clk]` no PGN) e `time_spent_ms` (tempo gasto, com increment já aplicado), populados via backfill em `compute.py`. **Não substitui Score** — é contexto narrativo. `compute_time_analysis` produz: tempo por fase, buckets de velocidade da decisão, pressão de relógio (clock <10% do orçamento) com blunder rate dentro/fora, top "pensou e errou" e "errou rápido". Renderiza como Seção 9 dos PDFs. Ignora `time_class='daily'`.
+
 ### Paradigmáticas (Seção 7 do PDF)
 
 - **Vitória**: 2 melhores lances do jogador (swing positivo) + 1 pior (loss máx)
@@ -186,6 +190,8 @@ Quando produto mudar, **atualizar essas docs no mesmo commit** que a mudança de
 | `data/openings/` e `data/tactical/` versionados, NÃO rebuildar local          | 2026-04-29 | Bases CC0 imutáveis                                         |
 | Não vamos fazer exportação DOCX                                               | 2026-04-29 | Removido do roadmap                                         |
 | Auto mode é o modo padrão de operação                                         | 2026-04-29 | Felipe confirma direto, não pede planos para tasks pequenas |
+| Análise de tempo via `[%clk]` do PGN — não muda Score, vira Seção 9 do PDF    | 2026-04-29 | `clock.py` + backfill em `history.py` + `compute_time_analysis` |
+| Skill `assess-data` para resumo da base                                       | 2026-04-29 | Inspeciona history.db, lista users + cobertura das 4 camadas    |
 
 ### Em aberto (decidir num próximo ciclo)
 
@@ -214,6 +220,7 @@ python3.12 .claude/skills/_chess_shared/build.py <user> enemy
 # Slash commands (Claude Code)
 /app-start                         # Liga app
 /app-stop                          # Desliga app
+/assess-data                       # Resumo da base (jogadores, camadas analíticas, depth)
 /report-myself <user>              # PDF diagnóstico próprio
 /report-enemy <user>               # PDF dossiê de combate
 ```

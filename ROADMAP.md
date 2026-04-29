@@ -19,6 +19,7 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 
 - **Tema tático automático** via fingerprint (woodpecker puzzles, 308k Lichess CC0). Implementado em `tactical-themes.js` (browser) + `scripts/build_tactical_index.py` (build). Índice: 32815 fingerprints B (posicional) + 2552 C (delta best vs played), 4 MB / 441 KB gzip.
 - **Fatos estruturais determinísticos** via `position_facts.py`: 24 detectores cobrindo estrutura de peões, colunas/diagonais, segurança do rei, material, caráter da posição. Roda em todo lance com `loss_cp ≥ 50`, com cache delta no DB.
+- **Análise de tempo (relógio)** via `clock.py` + backfill em `history.py`. Extrai `[%clk]` dos PGNs, popula `game_analyses.clock_ms`/`time_spent_ms`. `compute_time_analysis` em `compute.py` produz: tempo por fase, distribuição por bucket de velocidade, pressão de relógio (clock <10% do orçamento) com blunder rate inside/outside, top "pensou e errou" e "errou rápido". Renderizado como Seção 9 nos relatórios myself/enemy. Daily/correspondência ignorado.
 
 ### Pipeline SQLite (substitui CSV manual)
 
@@ -123,6 +124,12 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 **Por quê:** se o browser cachear sozinho, dispensa o servidor local pra usuários casuais.
 **Como:** Service worker que mantém `position_cache` em IndexedDB; sync periódico com SQLite via download/upload manual.
 **Custo:** 1 dia. Trade-off: hoje o `serve.py` é stdlib e simples; PWA adiciona complexidade.
+
+### 10. Cache de relatório por jogador (regen rápida + economia de tokens)
+**Por quê:** quando alguém pede `/report-myself <user>` várias vezes (ou alterna myself ↔ enemy), hoje a skill Claude reescreve TODAS as 11 seções do zero, gastando tokens. Mas `analyses.computed_json` no SQLite já preserva o JSON computado (compute.py é barato — ~5s). O caro é a redação.
+**Como:** ao gerar o relatório, salvar `data/db/sections_cache` (nova tabela) com `(username, perspective, stamp, sections_json, sample_signature)`. Em pedido subsequente do mesmo `(username, perspective)`, comparar `sample_signature` (hash de n_games + score_10 + top-3 metricas mudou?). Se mudança <5%, reusa sections cacheadas e só regenera deltas. Se mudou substancialmente, redige tudo. Skill recebe instrução: "se sections cacheadas estão presentes e válidas, atualize só os trechos com delta significativo".
+**Impacto:** segundo relatório do mesmo user em ~30s e ~10× menos tokens.
+**Custo:** 4–6h. Pré-requisito: definir o que é "delta significativo" por seção (heurística simples: n_games delta >20% OU score delta >0.5 → re-redige seção).
 
 ---
 
