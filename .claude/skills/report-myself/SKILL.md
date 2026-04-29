@@ -18,7 +18,7 @@ Antes de redigir, **leia obrigatoriamente em ordem**:
 ### Como integrar a profundidade teórica
 
 - **Cite motivos táticos pelo nome canônico** quando o lance decisivo couber (espeto, garfo, descoberto duplo, zwischenzug, sacrifício grego). Ver biblioteca em §11 do theory.md.
-- **Cite conceitos estratégicos pelo nome** quando o `position_features` da partida paradigmática indicar (IQP, hanging-pawns, opposite-castle, fianchetto, closed-center). Ver §12 e §20.
+- **Cite conceitos estratégicos pelo nome** quando o `position_facts` da partida paradigmática indicar (IQP, hanging-pawns, opposite-castle, fianchetto, closed-center). Ver §12 e §20.
 - **Cite as 7 técnicas posicionais magistrais** (Otimização, Hegemonia, Pressão, Provocação, Asfixia, Duas Fraquezas, Transição) quando uma partida ilustrar. Ver §13.
 - **Cite vieses cognitivos pelo nome** (otimismo/cegueira tática, ancoragem, hubris, complacência) quando o padrão de derrota encaixar. Ver §17.
 - **Cite autores/obras** (Capablanca, Nimzowitsch, Soltis, Vukovic, Dvoretsky, Aagaard, Yusupov, Silman) quando ANCORAR uma recomendação prática. Ver §19. Não cite só para parecer culto.

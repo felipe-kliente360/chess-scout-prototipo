@@ -25,7 +25,7 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 - Schema completo: `players`, `analyses` (snapshot por ciclo), `games`, `game_analyses` (PK game_id+ply, retenção da maior depth), `position_cache`. Coluna `position_facts` com migration via PRAGMA.
 - `scripts/serve.py` — servidor stdlib (sem Flask), API REST sobre o DB.
 - Browser auto-detecta `SERVER MODE`; persistência por partida (não a cada N lances); dedup via `?game_ids=...`.
-- `compute.py --from-db` lê direto do SQLite, sem CSV.
+- `compute.py <user>` lê direto do SQLite (CSV completamente descontinuado em `13ce2e1`).
 - `scripts/import_csv_to_db.py` — migration one-shot do legado.
 
 ### Score 0–10 (recalibração final 2026-04-29)
