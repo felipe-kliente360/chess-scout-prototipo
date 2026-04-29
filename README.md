@@ -303,17 +303,28 @@ python3.12 -m pip install --break-system-packages pandas jinja2 chess weasyprint
 
 (WeasyPrint precisa de Pango via brew. Pandas, jinja2, chess e weasyprint via pip. pytest é opcional.)
 
-## Setup inicial (uma vez por máquina)
+## Setup inicial
+
+**Não precisa rodar nenhum build.** As bases canônicas (`data/openings/eco.json` com 3.690 aberturas + `data/tactical/themes_index.json` com 308k puzzles processados) já vêm versionadas no repositório. Fresh-clone já é funcional.
+
+O que é local apenas (não vem versionado, será criado conforme uso):
+- `data/history.db` — partidas + análises do user (criado na 1ª chamada do servidor)
+- `data/openings/position_cache.json` — cache regenerável (opcional)
+- `data/<user>/` — relatórios PDF arquivados
+
+### (Opcional) Rebuilds manuais
+
+Só faça se quiser regenerar uma base do zero — em uso normal nunca é necessário:
 
 ```bash
-# 1. Construir índice ECO (3.690 aberturas indexadas)
+# Reconstruir índice ECO a partir dos TSVs Lichess em data/openings/
 python3.12 scripts/build_eco_index.py
 
-# 2. Backfill do cache de posições (se já houver CSVs em data/)
+# Reconstruir o cache de posições a partir do history.db
 python3.12 scripts/build_position_cache.py
 python3.12 scripts/export_cache.py
 
-# 3. Construir índice tático (a partir do woodpecker release; uma única vez)
+# Reconstruir o índice tático (precisa baixar o release woodpecker primeiro)
 python3.12 scripts/build_tactical_index.py \
   --source /tmp/woodpecker-data \
   --out data/tactical/themes_index.json \
