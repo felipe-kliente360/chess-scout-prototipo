@@ -206,8 +206,7 @@ chess-scout-prototipo/
 │   ├── stop.sh                           # /app-stop (SIGTERM → SIGKILL → limpa estado)
 │   ├── serve.py                          # Servidor local (stdlib)
 │   ├── build_eco_index.py                # Constrói eco.json (rebuild raro)
-│   ├── build_tactical_index.py           # Constrói themes_index.json
-│   └── import_csv_to_db.py               # Migration legada CSV → SQLite (one-shot)
+│   └── build_tactical_index.py           # Constrói themes_index.json
 │
 ├── tests/
 │   ├── conftest.py

@@ -21,6 +21,7 @@ data/*.json
 data/history.db
 data/history.db-wal
 data/history.db-shm
+data/history.db.backup-*
 
 # Relatórios PDF (PII) — ficam só local
 data-reports/

@@ -1,4 +1,4 @@
-"""Testes das funções puras de compute.py (sem dependência de CSV)."""
+"""Testes das funções puras de compute.py."""
 import math
 import pytest
 from compute import (
@@ -10,7 +10,6 @@ from compute import (
     classify_loss,
     phase_of_ply,
     cp_from_row,
-    detect_position_features,
 )
 
 
@@ -68,25 +67,27 @@ class TestScore10:
 # ── Expected ACPL ────────────────────────────────────────────────────────────
 
 class TestExpectedAcpl:
+    # Curva empírica chess.com: âncoras 1000:120, 1400:80, 1800:50, 2200:30, 2500:20.
+    # Faixas com folga para tolerar interpolação entre as âncoras.
     @pytest.mark.parametrize("rating,lo,hi", [
-        (800, 60, 75),
-        (1200, 40, 55),
-        (1600, 28, 40),
-        (2000, 20, 30),
-        (2400, 13, 22),
+        (800, 130, 170),
+        (1200, 85, 110),
+        (1600, 55, 75),
+        (2000, 35, 50),
+        (2400, 18, 28),
     ])
     def test_faixas_realistas(self, rating, lo, hi):
         v = expected_acpl(rating)
         assert lo <= v <= hi, f"rating {rating}: esperado entre {lo}-{hi}, foi {v}"
 
     def test_rating_invalido_usa_padrao(self):
-        # Fórmula `max(8, 130 * exp(-1200/1200))` ≈ 47.8 (rating None vira 1200)
-        assert 40 <= expected_acpl(None) <= 55
-        assert 40 <= expected_acpl(0) <= 55
+        # rating None/0 cai no default 1200 → ~95 cp
+        assert 85 <= expected_acpl(None) <= 110
+        assert 85 <= expected_acpl(0) <= 110
 
-    def test_satura_em_8(self):
-        # Mesmo rating absurdamente alto não pode ir abaixo de 8 cp esperado
-        assert expected_acpl(5000) >= 8
+    def test_satura_em_piso(self):
+        # Rating absurdamente alto não pode ir abaixo do piso da curva (20cp em 2500+)
+        assert expected_acpl(5000) >= 15
 
 
 # ── Depth factor ─────────────────────────────────────────────────────────────
@@ -169,49 +170,6 @@ class TestPhaseOfPly:
 
 
 # ── cp_from_row ──────────────────────────────────────────────────────────────
-
-class TestPositionFeatures:
-    def test_initial_position_no_features(self):
-        # Posição inicial: sem castle, centro intacto, par de bispos para os 2
-        feats = detect_position_features("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
-        assert "uncastled-king" in feats
-        assert "bishop-pair-white" in feats
-        assert "bishop-pair-black" in feats
-
-    def test_iqp_white(self):
-        # Branco com peão em d4 isolado, sem c ou e
-        # rnbqk2r/ppp2ppp/4pn2/3p4/2PP4/P4N2/1P3PPP/RNBQKB1R — não é IQP, c-peão presente
-        # Para IQP: peão d4 branco, sem c2, sem e3/e4
-        # rnbqkbnr/pp3ppp/4p3/3p4/3P4/8/PP2PPPP/RNBQKBNR — branco tem peões a2 b2 d4 e2 f2 g2 h2 — sem c-pawn
-        feats = detect_position_features("rnbqkbnr/pp3ppp/4p3/3p4/3P4/8/PP3PPP/RNBQKBNR w KQkq - 0 5")
-        assert "IQP-white" in feats
-
-    def test_opposite_castle(self):
-        # Preto castelado longo (rei em c8), branco castelado curto (rei em g1)
-        feats = detect_position_features("2kr1bnr/ppp2ppp/2n1p3/3p4/3P4/2N1P3/PPP2PPP/R1BQ1RK1 w - - 0 8")
-        assert "opposite-castle" in feats
-
-    def test_same_side_castle(self):
-        # Ambos roque curto
-        feats = detect_position_features("r1bq1rk1/ppp2ppp/2n1pn2/3p4/3P4/2N1PN2/PPP2PPP/R1BQ1RK1 w - - 0 8")
-        assert "same-side-castle" in feats
-
-    def test_fianchetto_kingside_white(self):
-        # Branco com bispo em g2 + peão em g3
-        feats = detect_position_features("rnbqkbnr/pppppppp/8/8/8/6P1/PPPPPPBP/RNBQK1NR b KQkq - 1 2")
-        assert "fianchetto-kingside-white" in feats
-
-    def test_open_file_detection(self):
-        # Coluna e sem peões dos dois lados
-        feats = detect_position_features("r1bqkbnr/pppp1ppp/2n5/4p3/3P4/2N5/PPP1PPPP/R1BQKBNR w KQkq - 0 3")
-        # e2 ainda presente, então e não é open. Vou usar posição mais limpa:
-        feats = detect_position_features("r3k2r/pppp1ppp/8/8/8/8/PPPP1PPP/R3K2R w KQkq - 0 1")
-        assert "open-e-file" in feats
-
-    def test_invalid_fen_returns_empty(self):
-        assert detect_position_features("not a fen") == []
-        assert detect_position_features("") == []
-
 
 class TestCpFromRow:
     def test_evaluation_em_peoes_vira_centipeoes(self):

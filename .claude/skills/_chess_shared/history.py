@@ -56,9 +56,8 @@ CREATE TABLE IF NOT EXISTS position_cache (
 CREATE INDEX IF NOT EXISTS idx_cache_fen ON position_cache(fen_key);
 
 -- ── Persistência de partidas e análises por jogo ──────────────────────────
--- Substitui o pipeline CSV: o browser grava games após fetch do chess.com
--- e game_analyses após cada análise Stockfish. compute.py lê daqui em modo
--- --from-db (não precisa exportar/copiar CSV). Dedup automático: ao buscar
+-- O browser grava games após fetch do chess.com e game_analyses após cada
+-- análise Stockfish. compute.py lê daqui direto. Dedup automático: ao buscar
 -- partidas, conferir games.game_id antes de re-fetch; ao analisar, conferir
 -- game_analyses(game_id, ply, depth) e pular se depth atual ≥ requisitado.
 
@@ -271,7 +270,7 @@ def list_players(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in cur.fetchall()]
 
 
-# ── Persistência de partidas + análises (substitui CSV) ──────────────────
+# ── Persistência de partidas + análises ──────────────────────────────────
 
 GAME_COLUMNS = (
     "game_id", "username", "date", "color", "opponent",

@@ -41,8 +41,7 @@ def latest(directory: Path, *patterns: str):
 
 
 def uci_to_san(fen: str, uci: str | None) -> str:
-    """Converte UCI (e2e4, c7c8q) para SAN (e4, c8=Q). Retorna '—' se ilegal/inválido.
-    (Best_moves do CSV de coleta podem vir corrompidos para alguns plies — mostrar '—' evita display enganoso.)"""
+    """Converte UCI (e2e4, c7c8q) para SAN (e4, c8=Q). Retorna '—' se ilegal/inválido."""
     if not uci or len(uci) < 4:
         return "—"
     try:
@@ -199,22 +198,14 @@ def main():
     template = env.get_template("template.html")
     html_str = template.render(c=computed, s=sections, stamp=stamp, perspective=perspective)
 
-    # Output centralizado em data-reports/ (item 12 do roadmap):
-    # nome canônico curto sem subpasta, computed.json fica só no SQLite.
+    # Output canônico em data-reports/<user>_<perspective>_<stamp>.pdf.
     out_pdf = REPORTS_DIR / f"{username}_{perspective}_{stamp}.pdf"
     HTML(string=html_str, base_url=str(skill_dir)).write_pdf(str(out_pdf))
 
-    # Limpa artefatos de apoio: computed.json, sections.json, e CSVs intermediários
-    # (modo legado). O computed_json fica preservado em analyses table (SQLite),
+    # Artefatos de apoio (computed.json, sections.json) deletados — o
+    # computed_json completo fica preservado em analyses table (SQLite),
     # então reprocessar com template novo continua possível.
-    games_csv = computed.get("source_games_csv")
-    analysis_csv = computed.get("source_analysis_csv")
     artifacts = [computed_file, sections_file]
-    for name in (games_csv, analysis_csv):
-        if name and not name.startswith("history.db"):
-            p = DATA_DIR / name
-            if p.exists():
-                artifacts.append(p)
     cleaned = 0
     for art in artifacts:
         try:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Lê os CSVs mais recentes de partidas + análise Stockfish do jogador
-e produz um JSON com todas as métricas necessárias para o relatório.
+Lê games + game_analyses de data/history.db e produz JSON com todas as
+métricas necessárias para o relatório (Score blend, agregados, paradigmáticas).
 
 Uso: python compute.py <username>
 """
@@ -462,7 +462,7 @@ def load_previous_computed(username: str, current_stamp: str):
 
 def load_from_db(username: str) -> tuple[pd.DataFrame, pd.DataFrame, int | None, str]:
     """Materializa games_df + an_df + depth a partir de history.db.
-    Retorna formato compatível com o pipeline CSV (mesmas colunas)."""
+    Retorna games_df + an_df nas colunas que o pipeline analítico espera."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import history  # type: ignore
     db_path = DATA_DIR / "history.db"
@@ -542,7 +542,7 @@ def main():
         themes = group.get("tactical_theme", pd.Series([""] * total_plies)).fillna("").tolist()
         confs = group.get("tactical_confidence", pd.Series([""] * total_plies)).fillna("").tolist()
         sources = group.get("tactical_source", pd.Series([""] * total_plies)).fillna("").tolist()
-        # game_id pode vir do CSV (modo arquivado) ou do DB (modo --from-db).
+        # game_id vem do DB (load_from_db preenche a coluna a partir de games.game_id).
         # No primeiro caso é a URL chess.com da partida; no segundo é a PK do row.
         gids_col = group.get("game_id", pd.Series([None] * total_plies)).tolist()
         # Cache de position_facts já gravado no DB (modo --from-db). String JSON ou vazio.
@@ -1349,8 +1349,7 @@ def main():
         "username": username,
         "stamp": stamp,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "source_games_csv": "history.db:games",
-        "source_analysis_csv": "history.db:game_analyses",
+        "data_source": "history.db:games+game_analyses",
         "stockfish_depth": depth,
         "sample_quality": {
             "tier": sample_tier,

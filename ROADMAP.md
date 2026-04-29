@@ -146,7 +146,6 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 
 ## 🐛 Bugs/débitos técnicos abertos
 
-- **Best_move repetido em CSVs antigos**: corrigido no `index.html` para coletas novas, mas os CSVs históricos têm dados ruins. `build.py` mostra "—" para esses.
 - **Coverage de testes**: helpers cobertos, mas pipeline end-to-end (compute → JSON) não tem teste de integração com fixture pequena.
 - **Sem CI**: testes rodam só local. Adicionar GitHub Actions com pytest seria o mínimo.
 - **Drift entre `theory.md` e SKILL.md**: documentação de redação dispersa em 3 lugares (theory.md compartilhado + SKILL.md de cada perspectiva).

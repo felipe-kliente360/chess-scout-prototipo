@@ -283,7 +283,7 @@
   let allAnalysis = [];
 
   // Servidor local (scripts/serve.py) é detectado quando a página é carregada
-  // via http(s) — abrir o index.html como file:// mantém o pipeline antigo de CSV.
+  // via http(s). Abrir o index.html como file:// não funciona — o app exige servidor.
   const SERVER_MODE = (location.protocol === "http:" || location.protocol === "https:");
   async function api(path, body) {
     const opts = body !== undefined
@@ -412,7 +412,6 @@
     if (SERVER_MODE) {
       el.innerHTML = '<span style="color:#6fcf6f;background:#0a3a0a;padding:2px 8px;border-radius:3px;font-size:11px;letter-spacing:1px">SERVER MODE · history.db</span>';
     } else {
-      // CSV foi descontinuado; servidor é obrigatório.
       el.innerHTML = '<span style="color:#e05555;background:#3a0a0a;padding:2px 8px;border-radius:3px;font-size:11px;letter-spacing:1px">⚠ SERVIDOR DESLIGADO — rode <code style="background:#1a0a0a;padding:1px 4px;border-radius:2px">scripts/start.sh</code> e abra http://127.0.0.1:8000/</span>';
     }
   }
@@ -491,13 +490,6 @@
       hits++;
     }
     return hits;
-  }
-
-  function toCSV(rows) {
-    if (!rows.length) return "";
-    const headers = Object.keys(rows[0]);
-    const escape = v => `"${String(v).replace(/"/g, '""')}"`;
-    return [headers.join(","), ...rows.map(r => headers.map(h => escape(r[h])).join(","))].join("\n");
   }
 
   function resetSession() {

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Servidor local que serve index.html + endpoints REST sobre data/history.db.
 
-Sem dependências externas — só stdlib. Substitui o pipeline CSV: o browser
-posta partidas + análises pra cá; compute.py lê o mesmo .db em --from-db.
+Sem dependências externas — só stdlib. O browser posta partidas + análises
+pra cá; compute.py lê o mesmo .db.
 
 Uso:
     python scripts/serve.py [--port 8000] [--host 127.0.0.1]

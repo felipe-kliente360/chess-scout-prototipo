@@ -117,6 +117,6 @@ Se houver `delta_vs_previous` no JSON, a Seção 11 deve incluir:
 
 ## Aprendizados acumulados
 
-- **`opening` vazio** em alguns CSVs antigos. Hoje a base ECO do Lichess (`data/openings/eco.json`) classifica ~3.690 posições; cobertura aparece em `c.eco_stats.coverage_pct`. Se < 80%, mencione na Seção 5.
+- **Cobertura ECO**: a base do Lichess (`data/openings/eco.json`) classifica ~3.690 posições; cobertura aparece em `c.eco_stats.coverage_pct`. Se < 80%, mencione na Seção 5.
 - **Score isolado em amostra pequena é ruído.** Sempre cruze com `confidence_pct`.
 - **Não cite ACPL no texto.** Score sempre. ACPL fica no JSON só para auditoria.

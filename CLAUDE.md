@@ -4,6 +4,41 @@ Documento que preserva decisões combinadas entre Felipe e Claude para o projeto
 
 Convenção: este arquivo é editável. Quando uma regra aqui ficar obsoleta, **atualize-a** em vez de empilhar contradições.
 
+## Communication Style
+
+Respond terse like smart caveman. Always in pt-BR. All technical substance stay. Only fluff die.
+ACTIVE EVERY RESPONSE. No exceptions. No revert.
+
+### Rules
+
+- Drop: articles (a/an/the/o/a/os/as/um/uma), filler (só/basicamente/realmente/simplesmente/literalmente), pleasantries (claro/com certeza/fico feliz em/olá), hedging
+- Fragments OK. Short synonyms (grande not extenso, corrigir not "implementar uma solução para")
+- Technical terms stay exact
+- Code blocks unchanged. Caveman speak around code, not in code
+- Error messages quoted exact
+
+### Pattern
+
+[coisa] [ação] [motivo]. [próximo passo].
+
+Not: "Claro! Fico feliz em ajudar com isso. O problema que você está enfrentando provavelmente é causado por..."
+Yes: "Bug no middleware de auth. Verificação de expiração usa `<` em vez de `<=`. Fix:"
+
+### Auto-Clarity
+
+Drop caveman only for:
+
+- Avisos de segurança
+- Confirmações de ações irreversíveis
+- Sequências onde fragmentos causam ambiguidade de risco
+  Resume immediately after.
+
+### Boundaries — always normal prose
+
+- Code blocks
+- Git commit messages
+- PR descriptions
+
 ---
 
 ## 1. O que é o projeto
@@ -20,6 +55,7 @@ Coleta (browser, API chess.com)
 ```
 
 Duas perspectivas de relatório:
+
 - **`/report-myself <user>`** — "este jogador sou eu" (diagnóstico + plano de estudo)
 - **`/report-enemy <user>`** — "este é meu adversário" (plano de combate)
 
@@ -67,7 +103,7 @@ Memórias e contexto antigo podem estar desatualizados. Antes de afirmar "X exis
 
 ### Pipeline canônico (não suportamos mais o legado)
 
-1. **CSV está descontinuado.** Nada de `find_latest_csvs`, `--from-db`, modo FILE no browser. Tudo via SQLite.
+1. **Pipeline 100% SQLite.** `data/history.db` é a fonte única — `games`, `game_analyses`, `analyses`, `players`, `position_cache`. Browser posta no servidor; `compute.py` lê direto.
 2. **Servidor local é obrigatório.** Browser via `file://` mostra badge vermelho e bloqueia operações com instrução pra rodar `bash scripts/start.sh` ou `/app-start`.
 3. **Output em `data-reports/`** (pasta única, sem subpasta por user). Formato: `<user>_<perspective>_<stamp>.pdf`.
 4. **Artefatos de apoio são deletados** após build. `computed.json` e `sections.json` ficam preservados em `analyses.computed_json` no SQLite — qualquer relatório pode ser regerado em ~5s.
@@ -97,6 +133,7 @@ score_10 = 10 × engine_factor × (
 ### As 3 camadas de análise (sempre coexistem)
 
 Para todo lance com `loss_cp ≥ 50`:
+
 1. **Stockfish** (sempre, em todo lance)
 2. **Tactical theme** (no browser via `tactical-themes.js`, fingerprint do woodpecker)
 3. **Position facts** (no Python via `position_facts.py`, 24 detectores; cache delta no DB)
@@ -136,19 +173,19 @@ Quando produto mudar, **atualizar essas docs no mesmo commit** que a mudança de
 
 ### Já decididas
 
-| Decisão | Data | Onde detalhar |
-|---|---|---|
-| Servidor stdlib (`http.server`), não Flask | 2026-04-29 | Fricção de dep externa não compensa o ganho em UX |
-| SQLite como fonte única, CSV descontinuado | 2026-04-29 | Removido em `13ce2e1` |
-| Score blend 50/30/20 + engine_factor + Opção B canônico | 2026-04-29 | Validado nos 3 casos extremos. README §"Score" |
-| 3 camadas independentes por posição | 2026-04-29 | Stockfish + tactical + facts; coexistem em `key_position` |
-| Output centralizado em `data-reports/`, sem JSON de apoio | 2026-04-29 | Implementado em `13ce2e1` |
-| Pasta `data/<user>/` removida (era arquivar; redundante com `analyses` table) | 2026-04-29 | Implementado em `13ce2e1` |
-| Lifecycle via `/app-start` e `/app-stop` | 2026-04-29 | Implementado em `397956f` |
-| Paradigmáticas no formato 2+1 (não top-3 swing) | 2026-04-29 | Validado com LucasCamilo10 |
-| `data/openings/` e `data/tactical/` versionados, NÃO rebuildar local | 2026-04-29 | Bases CC0 imutáveis |
-| Não vamos fazer exportação DOCX | 2026-04-29 | Removido do roadmap |
-| Auto mode é o modo padrão de operação | 2026-04-29 | Felipe confirma direto, não pede planos para tasks pequenas |
+| Decisão                                                                       | Data       | Onde detalhar                                               |
+| ----------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------- |
+| Servidor stdlib (`http.server`), não Flask                                    | 2026-04-29 | Fricção de dep externa não compensa o ganho em UX           |
+| SQLite como fonte única, CSV descontinuado                                    | 2026-04-29 | Removido em `13ce2e1`                                       |
+| Score blend 50/30/20 + engine_factor + Opção B canônico                       | 2026-04-29 | Validado nos 3 casos extremos. README §"Score"              |
+| 3 camadas independentes por posição                                           | 2026-04-29 | Stockfish + tactical + facts; coexistem em `key_position`   |
+| Output centralizado em `data-reports/`, sem JSON de apoio                     | 2026-04-29 | Implementado em `13ce2e1`                                   |
+| Pasta `data/<user>/` removida (era arquivar; redundante com `analyses` table) | 2026-04-29 | Implementado em `13ce2e1`                                   |
+| Lifecycle via `/app-start` e `/app-stop`                                      | 2026-04-29 | Implementado em `397956f`                                   |
+| Paradigmáticas no formato 2+1 (não top-3 swing)                               | 2026-04-29 | Validado com LucasCamilo10                                  |
+| `data/openings/` e `data/tactical/` versionados, NÃO rebuildar local          | 2026-04-29 | Bases CC0 imutáveis                                         |
+| Não vamos fazer exportação DOCX                                               | 2026-04-29 | Removido do roadmap                                         |
+| Auto mode é o modo padrão de operação                                         | 2026-04-29 | Felipe confirma direto, não pede planos para tasks pequenas |
 
 ### Em aberto (decidir num próximo ciclo)
 
@@ -186,22 +223,27 @@ python3.12 .claude/skills/_chess_shared/build.py <user> enemy
 ## 7. Onde Felipe e Claude erraram (lições)
 
 ### Acumular features no working tree
+
 - **Aconteceu**: 775 linhas em 4 arquivos sem commit desde `b159c34`. 8 commits temáticos foram criados de uma vez quando o user pediu organizar.
 - **Lição**: regra de commit progressivo (seção 2). Sempre que uma feature passa o smoke test, propor commit antes da próxima.
 
 ### `expected_acpl` calibrada para torneio clássico
+
 - **Aconteceu**: Score 2.2 pra miguelrov com win 68% — contraintuitivo.
 - **Lição**: curva empírica chess.com >> teórica clássica. Validar fórmulas em **3 casos extremos diversos** antes de declarar pronto.
 
 ### Score sem âncora em win-rate
+
 - **Aconteceu**: scoring puro de ACPL ignorava resultado das partidas. LucasCamilo10 com 85% win-rate dava Score 0.3.
 - **Lição**: blend de múltiplos sinais é mais robusto que métrica única. Win-rate, ACPL e blunders cada um pega aspecto diferente da habilidade.
 
 ### Pasta `data/<user>/` virou ruído
+
 - **Aconteceu**: 5 pastas com 9 PDFs antigos + JSONs intermediários acumularam.
 - **Lição**: SQLite (`analyses.computed_json`) é fonte canônica suficiente. Salvar artefatos em arquivo é cerimônia inútil quando o DB já guarda tudo.
 
 ### `position_features` (lista de tags simples) → `position_facts` (dicts ricos)
+
 - **Aconteceu**: primeira versão era lista plana sem casas, sem métricas. Insuficiente pra narrativa.
 - **Lição**: estrutura de dados deve carregar TUDO que o redator pode precisar. Casa específica + métricas auxiliares + status são mais úteis que tags binárias.
 
