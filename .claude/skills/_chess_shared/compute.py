@@ -97,13 +97,32 @@ def compute_accuracy(acpl: float) -> float:
     return round(100 * math.exp(-0.005 * acpl), 2)
 
 
+_ACPL_ANCHORS_CHESSCOM = [
+    # ACPL típico observado em chess.com online por faixa de rating, em depth 20.
+    # Fonte: âncoras pragmáticas calibradas com a literatura pública (Lichess
+    # insights e cheat-detection notes). Reflete que jogadores online cometem
+    # mais erros do que torneios clássicos no mesmo rating: um 1400 chess.com
+    # joga ACPL ~80, não 40 como a fórmula teórica antiga sugeria.
+    (800, 150), (1000, 120), (1200, 95), (1400, 80),
+    (1600, 65), (1800, 50), (2000, 40), (2200, 30),
+    (2400, 23), (2500, 20), (2700, 15),
+]
+
+
 def expected_acpl(rating: float | int) -> float:
-    """ACPL típico esperado para um rating (referência depth=20).
-    Empírico: 130 * exp(-rating/1200). Saturação inferior em 8 cp (limite GM)."""
-    import math
+    """ACPL típico esperado para um rating chess.com (referência depth=20).
+    Interpolação linear entre âncoras empíricas; saturação ≥15 cp (limite GM)."""
     if rating is None or rating <= 0:
-        rating = 1200  # padrão amador médio
-    return max(8.0, 130.0 * math.exp(-float(rating) / 1200.0))
+        rating = 1200
+    r = float(rating)
+    if r <= _ACPL_ANCHORS_CHESSCOM[0][0]:
+        return _ACPL_ANCHORS_CHESSCOM[0][1]
+    if r >= _ACPL_ANCHORS_CHESSCOM[-1][0]:
+        return _ACPL_ANCHORS_CHESSCOM[-1][1]
+    for (r1, a1), (r2, a2) in zip(_ACPL_ANCHORS_CHESSCOM, _ACPL_ANCHORS_CHESSCOM[1:]):
+        if r1 <= r <= r2:
+            return a1 + (a2 - a1) * (r - r1) / (r2 - r1)
+    return 50.0
 
 
 _DEPTH_ANCHORS = [(10, 0.50), (12, 0.55), (15, 0.65), (18, 0.85),
@@ -125,27 +144,49 @@ def depth_factor(depth: int | None) -> float:
     return 1.0
 
 
-def compute_score10(acpl, depth=None, rating=None):
-    """Score 0-10 calibrado por depth e rating.
+def compute_score10(acpl, depth=None, rating=None,
+                    win_rate=None, blunders=None, n_user_moves=None):
+    """Score 0-10 — blend ponderado de 3 componentes.
 
-    Lógica: normaliza ACPL para o equivalente a depth 20, compara com o ACPL esperado
-    para o rating do jogador, e mapeia o ratio para um score onde:
-      - ratio 0.0 (perfeito)              → 10
-      - ratio 0.5 (2x melhor que esperado) → 7.8
-      - ratio 1.0 (dentro do esperado)    → 6.1
-      - ratio 2.0 (2x pior que esperado)  → 3.7
-      - ratio 3.0+                        → < 2.5
+    50% — ACPL relativo: ACPL_d20_eq / expected_acpl(rating). Curva chess.com
+          empírica (não a teórica antiga que subestimava). Score do componente:
+          exp(-ratio/2). 1.0 = perfeito; 0.6 = jogou como esperado.
+    30% — Win-rate: win_rate / 100. 1.0 = ganhou tudo; 0.5 = empatou histórico;
+          0.0 = perdeu tudo.
+    20% — Redução de blunders: 1 / (1 + bpm/5), onde bpm = blunders por 100
+          lances do usuário. 0 blunders = 1.0; 5 bpm = 0.5; 10 bpm = 0.33.
 
-    Score 6 é o baseline "joguei como esperado para meu rating".
+    Compatibilidade: chamadas legadas que passam só (acpl, depth, rating)
+    recebem só o componente ACPL × 10 (sem blend), mantendo semântica antiga
+    para subsets onde win_rate não faz sentido (by_phase).
     """
     import math
     if acpl is None or acpl < 0:
         return 0.0
+
+    # Componente A — ACPL relativo
     df = depth_factor(depth) if depth is not None else 1.0
     acpl_eq = float(acpl) / df if df > 0 else float(acpl)
     expected = expected_acpl(rating)
     ratio = acpl_eq / expected if expected > 0 else 0
-    return round(10 * math.exp(-ratio / 2), 1)
+    acpl_score = math.exp(-ratio / 2)
+
+    # Sem win_rate disponível: retorna só componente A (compatibilidade)
+    if win_rate is None:
+        return round(10 * acpl_score, 1)
+
+    # Componente win-rate
+    win_score = max(0.0, min(1.0, float(win_rate) / 100.0))
+
+    # Componente blunder-reduction
+    if blunders is not None and n_user_moves and int(n_user_moves) > 0:
+        bpm = (float(blunders) / float(n_user_moves)) * 100
+        blunder_score = 1.0 / (1.0 + bpm / 5.0)
+    else:
+        blunder_score = 0.5  # neutro
+
+    blend = 0.5 * acpl_score + 0.3 * win_score + 0.2 * blunder_score
+    return round(10 * blend, 1)
 
 
 def competitive_window(rating: int | float | None) -> int:
@@ -181,15 +222,22 @@ def score_uncertainty_band(depth: int | None) -> float:
     return 1.5
 
 
-def compute_score_trio(loss_cps, opp_ratings, depth, player_rating, comp_window):
+def compute_score_trio(loss_cps, opp_ratings, depth, player_rating, comp_window,
+                       categories=None, results_per_move=None):
     """Calcula (geral, competitivo, ponderado) sobre um conjunto de lances.
 
     Inputs:
-      - loss_cps: pd.Series de loss_cp por lance (filtrado: só is_user_move + relevante)
-      - opp_ratings: pd.Series alinhada com loss_cps, com opponent_rating do jogo daquele lance
-      - depth, player_rating, comp_window: contexto do score
+      - loss_cps: pd.Series de loss_cp por lance
+      - opp_ratings: pd.Series alinhada, opponent_rating por lance
+      - depth, player_rating, comp_window
+      - categories: pd.Series alinhada com category ('blunder'/'mistake'/'inaccuracy'/'good')
+      - results_per_move: pd.Series alinhada com result da partida ('Win'/'Loss'/'Draw')
 
-    Returns: dict com {acpl_*, score_10_*, n_competitive, n_eff_weighted}
+    Quando categories e results_per_move estão disponíveis, o score blend
+    (50% ACPL + 30% win-rate + 20% blunders) é aplicado em cada variante
+    com seus respectivos subsets.
+
+    Returns: dict com acpl_*, score_10_*, win_rate_*, blunders_*, n_*_moves.
     """
     import math as _math
     out = {
@@ -200,25 +248,61 @@ def compute_score_trio(loss_cps, opp_ratings, depth, player_rating, comp_window)
     if len(loss_cps) == 0:
         return out
 
+    has_cat = categories is not None and len(categories) == len(loss_cps)
+    has_res = results_per_move is not None and len(results_per_move) == len(loss_cps)
+
+    def _win_rate(mask=None):
+        if not has_res: return None
+        sub = results_per_move if mask is None else results_per_move[mask]
+        if not len(sub): return None
+        # win_rate calculado em base de lances (não partidas) — proxy bom porque
+        # cada partida contribui proporcional ao seu nº de lances do user
+        wins = (sub == "Win").sum()
+        return round(100 * float(wins) / len(sub), 1)
+
+    def _blunder_count(mask=None):
+        if not has_cat: return None
+        sub = categories if mask is None else categories[mask]
+        return int((sub == "blunder").sum())
+
+    # Overall
     out["acpl_overall"] = round(float(loss_cps.mean()), 2)
-    out["score_10_overall"] = compute_score10(out["acpl_overall"], depth, player_rating)
+    out["score_10_overall"] = compute_score10(
+        out["acpl_overall"], depth, player_rating,
+        win_rate=_win_rate(), blunders=_blunder_count(), n_user_moves=len(loss_cps),
+    )
 
     if player_rating and len(opp_ratings) and opp_ratings.notna().any():
         opp_clean = opp_ratings.fillna(player_rating)
         gap = (opp_clean - player_rating).abs()
         comp_mask = gap <= comp_window
-        if comp_mask.sum() >= 5:
+        n_comp = int(comp_mask.sum())
+        if n_comp >= 5:
             comp_acpl = round(float(loss_cps[comp_mask].mean()), 2)
             out["acpl_competitive"] = comp_acpl
-            out["score_10_competitive"] = compute_score10(comp_acpl, depth, player_rating)
-            out["n_competitive_moves"] = int(comp_mask.sum())
+            out["score_10_competitive"] = compute_score10(
+                comp_acpl, depth, player_rating,
+                win_rate=_win_rate(comp_mask),
+                blunders=_blunder_count(comp_mask), n_user_moves=n_comp,
+            )
+            out["n_competitive_moves"] = n_comp
 
         weights = ((opp_clean - player_rating) / 300.0).apply(lambda x: _math.exp(-(x ** 2)))
         sum_w = float(weights.sum())
         if sum_w > 0:
             wacpl = round(float((loss_cps * weights).sum() / sum_w), 2)
+            # win-rate ponderado: cada lance vencedor conta pelo seu peso
+            if has_res:
+                wins_w = float(((results_per_move == "Win").astype(float) * weights).sum())
+                w_winrate = round(100 * wins_w / sum_w, 1) if sum_w > 0 else None
+            else:
+                w_winrate = None
             out["acpl_weighted"] = wacpl
-            out["score_10_weighted"] = compute_score10(wacpl, depth, player_rating)
+            out["score_10_weighted"] = compute_score10(
+                wacpl, depth, player_rating,
+                win_rate=w_winrate,
+                blunders=_blunder_count(), n_user_moves=int(round(sum_w)),
+            )
             out["n_eff_weighted"] = round(sum_w, 1)
     return out
 
@@ -561,10 +645,26 @@ def main():
     filter_reasons = Counter(reason for ok, reason in relevance_decisions.values() if not ok)
 
     # Universo analítico: lances do usuário em partidas relevantes
-    user_moves = user_moves_all[user_moves_all["game_index"].isin(relevant_game_indices)]
+    user_moves = user_moves_all[user_moves_all["game_index"].isin(relevant_game_indices)].copy()
+
+    # Anota result da partida em cada lance pra alimentar o blend (Win/Loss/Draw).
+    result_by_game_index = {int(row["index"]): row["result"] for _, row in games_df.iterrows()}
+    user_moves["game_result"] = user_moves["game_index"].map(result_by_game_index)
+
+    def _subset_metrics(subset_moves):
+        """Retorna (acpl, win_rate, blunders, n_moves) pra rodar score blend."""
+        if not len(subset_moves):
+            return None, None, None, 0
+        acpl = round(float(subset_moves["loss_cp"].mean()), 2)
+        n = int(len(subset_moves))
+        blunders = int((subset_moves["category"] == "blunder").sum())
+        wins = int((subset_moves["game_result"] == "Win").sum())
+        win_rate = round(100 * wins / n, 1) if n else None
+        return acpl, win_rate, blunders, n
 
     overall_acpl = round(user_moves["loss_cp"].mean(), 2) if len(user_moves) else 0.0
     overall_accuracy = compute_accuracy(overall_acpl)
+    _, overall_win_rate_moves, overall_blunders, overall_n_moves = _subset_metrics(user_moves)
 
     # ── Score competitivo: subset de partidas com adversário em janela ±max(150, 10% rating) ──
     # Motivação: rating médio + adversários muito desbalanceados distorcem o expected_acpl.
@@ -583,8 +683,12 @@ def main():
     n_competitive = len(competitive_game_indices)
     competitive_user_moves = user_moves[user_moves["game_index"].isin(competitive_game_indices)]
     if len(competitive_user_moves) and n_competitive >= 5:
-        competitive_acpl = round(competitive_user_moves["loss_cp"].mean(), 2)
-        competitive_score = compute_score10(competitive_acpl, depth, player_rating)
+        c_acpl, c_winrate, c_blunders, c_nmoves = _subset_metrics(competitive_user_moves)
+        competitive_acpl = c_acpl
+        competitive_score = compute_score10(c_acpl, depth, player_rating,
+                                            win_rate=c_winrate,
+                                            blunders=c_blunders,
+                                            n_user_moves=c_nmoves)
     else:
         competitive_acpl = None
         competitive_score = None
@@ -607,8 +711,13 @@ def main():
         sum_w = float(weights_per_move.sum())
         if sum_w > 0:
             weighted_acpl = round(float((user_moves["loss_cp"] * weights_per_move).sum() / sum_w), 2)
-            weighted_score = compute_score10(weighted_acpl, depth, player_rating)
-            # Soma de pesos por jogo = "partidas-equivalentes" (n_eff). Útil pra confiança.
+            # win-rate ponderado: vitória conta pelo peso da partida (gap menor = peso maior)
+            wins_w = float(((user_moves["game_result"] == "Win").astype(float) * weights_per_move).sum())
+            weighted_winrate = round(100 * wins_w / sum_w, 1) if sum_w > 0 else None
+            weighted_score = compute_score10(weighted_acpl, depth, player_rating,
+                                             win_rate=weighted_winrate,
+                                             blunders=overall_blunders,
+                                             n_user_moves=int(round(sum_w)))
             game_weights = pd.Series({gi: _game_weight(gi) for gi in relevant_game_indices})
             n_eff_weighted = round(float(game_weights.sum()), 1)
         else:
@@ -689,10 +798,17 @@ def main():
             sub_m = user_moves[user_moves["game_index"].isin(sub_g["index"])]
             if len(sub_m) and opp_rating_per_game is not None:
                 opp_aligned = sub_m["game_index"].map(opp_rating_per_game)
-                trio = compute_score_trio(sub_m["loss_cp"], opp_aligned, depth, player_rating, comp_window_for_tc)
+                trio = compute_score_trio(
+                    sub_m["loss_cp"], opp_aligned, depth, player_rating, comp_window_for_tc,
+                    categories=sub_m["category"], results_per_move=sub_m["game_result"],
+                )
             else:
-                trio = compute_score_trio(sub_m["loss_cp"] if len(sub_m) else pd.Series([], dtype=float),
-                                          pd.Series([], dtype=float), depth, player_rating, comp_window_for_tc)
+                trio = compute_score_trio(
+                    sub_m["loss_cp"] if len(sub_m) else pd.Series([], dtype=float),
+                    pd.Series([], dtype=float), depth, player_rating, comp_window_for_tc,
+                    categories=sub_m["category"] if len(sub_m) else None,
+                    results_per_move=sub_m["game_result"] if len(sub_m) else None,
+                )
             by_time_class[tc_str] = {
                 "games": n,
                 "games_relevant": n_rel,
@@ -722,14 +838,19 @@ def main():
             sub_m = user_moves[user_moves["game_index"].isin(sub_g["index"])]
             n_rel = int(sub_g["index"].isin(relevant_game_indices).sum())
             acpl_c = round(sub_m["loss_cp"].mean(), 2) if len(sub_m) else 0.0
+            wr_c = round(100 * w / len(sub_g), 1)
+            blunders_c = int((sub_m["category"] == "blunder").sum()) if len(sub_m) else 0
             by_color[color] = {
                 "games": int(len(sub_g)),
                 "games_relevant": n_rel,
                 "wins": w, "losses": l, "draws": d,
-                "win_rate": round(100 * w / len(sub_g), 1),
+                "win_rate": wr_c,
                 "acpl": acpl_c,
                 "accuracy": compute_accuracy(acpl_c),
-                "score_10": compute_score10(acpl_c, depth, player_rating),
+                "score_10": compute_score10(acpl_c, depth, player_rating,
+                                            win_rate=wr_c,
+                                            blunders=blunders_c,
+                                            n_user_moves=len(sub_m)),
             }
         else:
             by_color[color] = {"games": 0, "games_relevant": 0, "wins": 0, "losses": 0, "draws": 0,
@@ -754,15 +875,18 @@ def main():
 
     def _agg_by(key_col):
         out = {}
-        # ACPL: vem de user_moves_keyed que já está filtrado para partidas relevantes
-        acpl_grp = user_moves_keyed.groupby(key_col)["loss_cp"].mean().round(2).to_dict()
-        # Counts: sobre todas as partidas (record histórico)
+        # ACPL e blunders por chave, vindos de user_moves (relevantes apenas)
+        sub_user = user_moves_keyed.groupby(key_col)
+        acpl_grp = sub_user["loss_cp"].mean().round(2).to_dict()
+        blunders_grp = sub_user["category"].apply(lambda s: int((s == "blunder").sum())).to_dict()
+        nmoves_grp = sub_user.size().to_dict()
         for key, sub in games_df.groupby(key_col):
             n = len(sub)
             w = int((sub["result"] == "Win").sum())
             l = int((sub["result"] == "Loss").sum())
             d = int((sub["result"] == "Draw").sum())
             n_rel = int(sub["index"].isin(relevant_game_indices).sum())
+            wr_key = round(100 * w / n, 1) if n else 0
             ply_series = pd.to_numeric(sub.get("eco_ply"), errors="coerce") if "eco_ply" in sub.columns else pd.Series([], dtype=float)
             ply_clean = ply_series.dropna() if len(ply_series) else ply_series
             avg_ply = round(float(ply_clean.mean()), 1) if len(ply_clean) else None
@@ -770,9 +894,14 @@ def main():
             out[key] = {
                 "name": key, "n": n, "n_relevant": n_rel,
                 "wins": w, "losses": l, "draws": d,
-                "win_rate": round(100 * w / n, 1) if n else 0,
+                "win_rate": wr_key,
                 "acpl": acpl_val,
-                "score_10": compute_score10(acpl_val, depth, player_rating) if acpl_val is not None else None,
+                "score_10": compute_score10(
+                    acpl_val, depth, player_rating,
+                    win_rate=wr_key,
+                    blunders=blunders_grp.get(key),
+                    n_user_moves=nmoves_grp.get(key),
+                ) if acpl_val is not None else None,
                 "avg_eco_ply": avg_ply,
             }
         return out
@@ -817,15 +946,18 @@ def main():
         worst_idx = user_sub["loss_cp"].idxmax()
         worst = user_sub.loc[worst_idx]
         meta = games_lookup.get(int(gi), {})
-        # Fatos estruturais no FEN do worst_move — caracteriza a posição
-        # onde o jogador colapsou. Alimenta o agregado kpis.position_facts_top.
         try:
             worst_facts = detect_position_facts(str(worst["fen_before"]))
         except Exception:
             worst_facts = []
+        # Win-rate da partida individual: 100 (vitória), 0 (derrota), 50 (empate)
+        result_g = meta.get("result")
+        wr_g = 100.0 if result_g == "Win" else (0.0 if result_g == "Loss" else 50.0)
+        blunders_g = int((user_sub["category"] == "blunder").sum())
+        n_moves_g = int(len(user_sub))
         game_metrics.append({
             "game_index": int(gi),
-            "result": meta.get("result"),
+            "result": result_g,
             "color": meta.get("color"),
             "opponent": meta.get("opponent"),
             "opponent_rating": safe_int(meta.get("opponent_rating")),
@@ -835,9 +967,11 @@ def main():
             "termination": (meta.get("termination") or "").strip(),
             "acpl": acpl_g,
             "accuracy": compute_accuracy(acpl_g),
-            "score_10": compute_score10(acpl_g, depth, player_rating),
-            "n_user_moves": int(len(user_sub)),
-            "blunders": int((user_sub["category"] == "blunder").sum()),
+            "score_10": compute_score10(acpl_g, depth, player_rating,
+                                        win_rate=wr_g, blunders=blunders_g,
+                                        n_user_moves=n_moves_g),
+            "n_user_moves": n_moves_g,
+            "blunders": blunders_g,
             "mistakes": int((user_sub["category"] == "mistake").sum()),
             "worst_move": {
                 "ply": int(worst["ply"]),
@@ -1235,10 +1369,16 @@ def main():
             "win_rate": win_rate,
             "acpl": overall_acpl,
             "accuracy": overall_accuracy,
-            "score_10": compute_score10(overall_acpl, depth, player_rating),
+            "score_10": compute_score10(overall_acpl, depth, player_rating,
+                                        win_rate=overall_win_rate_moves,
+                                        blunders=overall_blunders,
+                                        n_user_moves=overall_n_moves),
             "score_10_competitive": competitive_score,
             "score_10_weighted": weighted_score,
-            "score_10_overall": compute_score10(overall_acpl, depth, player_rating),
+            "score_10_overall": compute_score10(overall_acpl, depth, player_rating,
+                                                win_rate=overall_win_rate_moves,
+                                                blunders=overall_blunders,
+                                                n_user_moves=overall_n_moves),
             "score_10_by_modality_avg": score_modality_avg,
             "score_10_modality_spread": score_modality_spread,
             "score_10_by_modality_breakdown": modality_scores,
@@ -1305,7 +1445,10 @@ def main():
     print(f"✅ {out_path}")
     print(f"   ACPL={overall_acpl} | accuracy={overall_accuracy}% | "
           f"W/L/D={wins}/{losses}/{draws} | partidas paradigmáticas={len(paradigmatic)}")
-    score_overall = compute_score10(overall_acpl, depth, player_rating)
+    score_overall = compute_score10(overall_acpl, depth, player_rating,
+                                    win_rate=overall_win_rate_moves,
+                                    blunders=overall_blunders,
+                                    n_user_moves=overall_n_moves)
     print(f"   Score: geral={score_overall} | competitivo={competitive_score} (n={n_competitive}, ±{comp_window} Elo) | "
           f"ponderado={weighted_score} (n_eff={n_eff_weighted}, σ={int(WEIGHT_SIGMA)} Elo)")
     if modality_scores:
