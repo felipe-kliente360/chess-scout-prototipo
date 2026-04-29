@@ -196,7 +196,7 @@ Quando produto mudar, **atualizar essas docs no mesmo commit** que a mudança de
 ### Em aberto (decidir num próximo ciclo)
 
 - Modelo de produto (B2C jogador casual / B2B treinador / interno) — afeta priorização das próximas iterações
-- Modelo de cobrança (se B2C) — por relatório vs assinatura vs freemium
+- Modelo de cobrança (se B2C) — por relatório vs assinatura vs freemium. **Custo unitário LLM**: ~R$ 1,08 por relatório sem otimização (Opus 4.7, ~$0.20 a USD/BRL 5,40). Com prompt caching cai pra R$ 0,54; com cache de sections (item #10 do roadmap), R$ 0,11–0,27. Detalhamento + implicações em `ROADMAP.md §Modelo de cobrança`.
 - Stockfish 16 vs 17 vs Leela
 - Tabela `execution_logs` para recalibrar a estimativa de tempo no `index.html` (item #4 do roadmap)
 

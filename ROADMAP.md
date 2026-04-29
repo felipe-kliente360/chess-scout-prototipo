@@ -145,6 +145,29 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 - Assinatura mensal (1 relatório/mês incluído + cache acumulado).
 - Freemium: 1 relatório grátis com sample reduzido, paga full.
 
+#### Custo unitário estimado (LLM) — referência 2026-04-29
+
+Medido com LucasCamilo10 (100 partidas analisadas, depth 15, computed_json 39 KB). Modelo Opus 4.7. USD/BRL = 5,40.
+
+| Cenário | Input tok | Output tok | USD | BRL |
+|---|---|---|---|---|
+| 1 relatório sem otimização (estado atual) | 35k | 6k | $0.20 | **R$ 1,08** |
+| 1 relatório com prompt caching (theory/SKILL/CLAUDE estáticos) | ~4k efetivos | 6k | $0.10 | **R$ 0,54** |
+| 1 relatório + cache de sections.json (regenera só deltas; item #10 do roadmap) | ~4k | ~1k | $0.02–0.05 | **R$ 0,11–0,27** |
+| **2 relatórios (myself + enemy)** sem otimização | 70k | 11k | $0.40 | **R$ 2,16** |
+| **2 relatórios** com prompt caching | — | — | $0.20 | **R$ 1,08** |
+| **2 relatórios** com caching + sections cache | — | — | $0.04–0.10 | **R$ 0,22–0,54** |
+
+**Tempo de geração:** 2–4 min por relatório (Opus a ~40–60 tok/s gerando 5–7k output).
+Compute.py + build.py somam ~10s e zero token.
+
+**Implicações para go-to-market:**
+- **Por relatório a R$ 5,00**: margem ≥80% mesmo sem otimização. Razoável pra início.
+- **Assinatura mensal R$ 19,90 com 4 relatórios/mês**: COGS R$ 4,32 sem otimização, R$ 0,88 com tudo ligado → margem 78%–96%.
+- **Freemium**: o primeiro relatório custa R$ 1,08–2,16 (myself + enemy combo); recuperável em ≥1 conversão a cada 5–10 free.
+- **Custo de coleta + análise Stockfish**: zero LLM, mas exige browser aberto ~30 min em depth 15. Em backend nativo (item #1 do roadmap), cai pra ~3 min/user — viabiliza B2C.
+- **Não esquecer**: cobertura ECO + base tactical fingerprints é CC0 (zero custo de licença). PGN do chess.com é grátis via API.
+
 ### Cobertura de motor
 - Manter Stockfish 16 atual ou subir para 17 (já lançado, ~200 Elo a mais)?
 - Considerar engine alternativo (Leela Chess Zero) para análise posicional/estratégica diferente.
