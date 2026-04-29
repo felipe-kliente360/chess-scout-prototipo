@@ -15,6 +15,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
+import chess
 
 ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = ROOT / "data"
@@ -47,6 +48,166 @@ def find_latest_csvs(username: str) -> tuple[Path, Path, str]:
     stamp_match = DATE_RE.search(analysis_path.name) or DATE_RE.search(games_path.name)
     stamp = stamp_match.group(1) if stamp_match else date.today().strftime("%Y%m%dT%H%M%S")
     return games_path, analysis_path, stamp
+
+
+def detect_position_features(fen: str) -> list[str]:
+    """Detecta padrões estruturais canônicos numa posição (FEN).
+    Retorna lista de tags como 'IQP-white', 'opposite-castle', 'open-c-file',
+    'closed-center', 'fianchetto-kingside', etc. Vocabulário ancorado em
+    Soltis (Pawn Structure Chess) e Kmoch (Pawn Power in Chess).
+
+    Tags possíveis (ver theory.md §20):
+      IQP-{white|black}, hanging-pawns-{white|black}, backward-pawn-{white|black}
+      closed-center, semi-open-center, open-center
+      same-side-castle, opposite-castle, uncastled-king
+      fianchetto-kingside-{white|black}, fianchetto-queenside-{white|black}
+      open-{a..h}-file, semi-open-{a..h}-file
+      bishop-pair-{white|black}
+      pawn-majority-queenside-{white|black}, pawn-majority-kingside-{white|black}
+    """
+    try:
+        board = chess.Board(fen)
+    except Exception:
+        return []
+    tags = []
+
+    # Helper: peões por cor e por arquivo
+    files_white = [0] * 8  # contagem por arquivo (a=0..h=7)
+    files_black = [0] * 8
+    for sq in chess.SQUARES:
+        p = board.piece_at(sq)
+        if p and p.piece_type == chess.PAWN:
+            f = chess.square_file(sq)
+            if p.color == chess.WHITE:
+                files_white[f] += 1
+            else:
+                files_black[f] += 1
+
+    # Helper: posição do rei (para detectar roque)
+    wk = board.king(chess.WHITE)
+    bk = board.king(chess.BLACK)
+
+    # ── IQP (peão dama isolado) ─────────────────────────────────
+    # Branco: peão em d4 sem peões em c e e (só peão d isolado)
+    if files_white[3] >= 1 and files_white[2] == 0 and files_white[4] == 0:
+        # Só conta como IQP se o peão d está realmente em d4 (estrutura central)
+        for sq in chess.SQUARES:
+            p = board.piece_at(sq)
+            if p and p.piece_type == chess.PAWN and p.color == chess.WHITE and chess.square_file(sq) == 3:
+                if chess.square_rank(sq) == 3:  # d4
+                    tags.append("IQP-white")
+                    break
+    if files_black[3] >= 1 and files_black[2] == 0 and files_black[4] == 0:
+        for sq in chess.SQUARES:
+            p = board.piece_at(sq)
+            if p and p.piece_type == chess.PAWN and p.color == chess.BLACK and chess.square_file(sq) == 3:
+                if chess.square_rank(sq) == 4:  # d5
+                    tags.append("IQP-black")
+                    break
+
+    # ── Peões pendurados (hanging pawns: c+d ou d+e juntos sem suporte) ──
+    # Branco: peões c4+d4 (ou d4+e4), sem b ou e (ou d+e sem c+f)
+    if files_white[2] == 1 and files_white[3] == 1 and files_white[1] == 0 and files_white[4] == 0:
+        tags.append("hanging-pawns-white")
+    if files_black[2] == 1 and files_black[3] == 1 and files_black[1] == 0 and files_black[4] == 0:
+        tags.append("hanging-pawns-black")
+
+    # ── Roque (cor dos reis) ────────────────────────────────────
+    def castle_side(king_sq):
+        if king_sq is None:
+            return None
+        f = chess.square_file(king_sq)
+        if f >= 5:
+            return "kingside"
+        if f <= 2:
+            return "queenside"
+        return "center"
+    wcs = castle_side(wk)
+    bcs = castle_side(bk)
+    if wcs == "center" and bcs == "center":
+        tags.append("uncastled-king")
+    elif wcs and bcs and wcs != "center" and bcs != "center":
+        if wcs == bcs:
+            tags.append("same-side-castle")
+        else:
+            tags.append("opposite-castle")
+
+    # ── Fianchetto (bispo em b2/g2 com peão em b3/g3 ou b7/g7) ──
+    def has_fianchetto(color, side):
+        if color == chess.WHITE:
+            bishop_sq = chess.G2 if side == "kingside" else chess.B2
+            pawn_sq = chess.G3 if side == "kingside" else chess.B3
+        else:
+            bishop_sq = chess.G7 if side == "kingside" else chess.B7
+            pawn_sq = chess.G6 if side == "kingside" else chess.B6
+        bp = board.piece_at(bishop_sq)
+        pp = board.piece_at(pawn_sq)
+        return (bp and bp.piece_type == chess.BISHOP and bp.color == color and
+                pp and pp.piece_type == chess.PAWN and pp.color == color)
+    for color, label in [(chess.WHITE, "white"), (chess.BLACK, "black")]:
+        for side in ("kingside", "queenside"):
+            if has_fianchetto(color, side):
+                tags.append(f"fianchetto-{side}-{label}")
+
+    # ── Centro (caráter aberto / fechado / semi-aberto) ────────
+    # Conta peões nas 4 casas centrais (d4,d5,e4,e5) e adjacentes
+    central_pawns = 0
+    for sq in (chess.D4, chess.D5, chess.E4, chess.E5):
+        p = board.piece_at(sq)
+        if p and p.piece_type == chess.PAWN:
+            central_pawns += 1
+    # Peões locked: d4 vs d5 ou e4 vs e5 trancados
+    locked = False
+    for f, rank_white, rank_black in [(3, 3, 4), (4, 3, 4)]:  # d-file, e-file
+        wp = board.piece_at(chess.square(f, rank_white))
+        bp = board.piece_at(chess.square(f, rank_black))
+        if (wp and wp.piece_type == chess.PAWN and wp.color == chess.WHITE and
+                bp and bp.piece_type == chess.PAWN and bp.color == chess.BLACK):
+            locked = True
+            break
+    if locked:
+        tags.append("closed-center")
+    elif central_pawns == 0:
+        tags.append("open-center")
+    elif central_pawns <= 2:
+        tags.append("semi-open-center")
+
+    # ── Colunas abertas / semi-abertas ─────────────────────────
+    file_letters = "abcdefgh"
+    for f in range(8):
+        if files_white[f] == 0 and files_black[f] == 0:
+            tags.append(f"open-{file_letters[f]}-file")
+        elif files_white[f] == 0 or files_black[f] == 0:
+            # Semi-aberta só vale a pena destacar para colunas centrais ou semi-centrais
+            if f in (2, 3, 4, 5):
+                tags.append(f"semi-open-{file_letters[f]}-file")
+
+    # ── Par de bispos ──────────────────────────────────────────
+    for color, label in [(chess.WHITE, "white"), (chess.BLACK, "black")]:
+        bishops = [sq for sq in chess.SQUARES
+                   if (p := board.piece_at(sq)) and p.piece_type == chess.BISHOP and p.color == color]
+        if len(bishops) == 2:
+            # Par real só se forem de cores opostas
+            colors = {chess.square_rank(b) + chess.square_file(b) for b in bishops}
+            if len(colors) == 2:
+                tags.append(f"bishop-pair-{label}")
+
+    # ── Maioria de peões (queenside vs kingside) ────────────────
+    # Detecta apenas se houver assimetria clara (≥2 peões a mais de um lado)
+    qs_white = sum(files_white[:4])
+    ks_white = sum(files_white[4:])
+    qs_black = sum(files_black[:4])
+    ks_black = sum(files_black[4:])
+    if qs_white - qs_black >= 2:
+        tags.append("pawn-majority-queenside-white")
+    elif qs_black - qs_white >= 2:
+        tags.append("pawn-majority-queenside-black")
+    if ks_white - ks_black >= 2:
+        tags.append("pawn-majority-kingside-white")
+    elif ks_black - ks_white >= 2:
+        tags.append("pawn-majority-kingside-black")
+
+    return tags
 
 
 def cp_from_row(row) -> float:
@@ -676,6 +837,14 @@ def main():
 
     for pg in paradigmatic:
         pg["key_positions"] = _decisive_positions(pg["game_index"], pg["color"], pg["result"])
+        # Detecta padrões estruturais usando o FEN do meio do jogo (~ply 24, ou último disponível)
+        pg_moves = moves_df[moves_df["game_index"] == pg["game_index"]].sort_values("ply")
+        if len(pg_moves):
+            mid_idx = min(len(pg_moves) - 1, max(0, len(pg_moves) // 2))
+            mid_fen = pg_moves.iloc[mid_idx]["fen_before"]
+            pg["position_features"] = detect_position_features(str(mid_fen))
+        else:
+            pg["position_features"] = []
 
     # Seção 13 (Partidas analisadas): top 5 vitórias + top 5 derrotas, com label rico (V/D + score + adversário)
     references = []

@@ -202,3 +202,249 @@ Evite:
 - Vocabulário ostensivo quando há sinônimo simples ("cartografia estratégica" → "padrões de jogo"; "engenharia dos finais" → "como conduz finais").
 
 A meta é: **um leigo culto entende, um enxadrista experiente concorda.**
+
+---
+
+## 11. Biblioteca de motivos táticos (cite pelo nome quando detectar)
+
+Use os nomes canônicos. Cada motivo tem **pista de detecção** para identificar nas partidas paradigmáticas. Quando o `worst_move` ou um lance decisivo couber num desses padrões, **cite pelo nome** — ancora o aprendizado e dá autoridade.
+
+| Motivo | Definição em uma frase | Pista de detecção |
+|---|---|---|
+| **Cravada** (pin) — absoluta vs. relativa | Peça presa que não pode mover sem expor uma peça mais valiosa atrás dela | Bispo/torre/dama na mesma linha que duas peças adversárias, sendo a de trás mais valiosa |
+| **Espeto** (skewer) | Como cravada, mas a peça de trás é a mais valiosa e tem que sair | Frequente em finais de torres |
+| **Garfo** (fork) — cavalo, dama, peão, rei | Uma peça ataca duas ou mais ao mesmo tempo | Cavalo no meio do tabuleiro (e5, d5) frequentemente garfa |
+| **Ataque descoberto** (discovered attack) | Mover uma peça revela ataque de outra atrás dela | Frequente em posições com bispo/torre na mesma fila/coluna que peça adversária valiosa |
+| **Xeque duplo** (double check) | Duas peças dão xeque ao mesmo tempo — rei obrigado a mover | Devastador, geralmente leva a mate ou ganho material |
+| **Remoção do defensor** (removing the defender) | Captura ou afasta a peça que protege uma fraqueza | Procurar peça defendida só uma vez |
+| **Desvio** (deflection) | Força peça a sair da função defensiva | Lance forçante (xeque, captura) que tira o defensor |
+| **Isca** (decoy) | Atrai peça adversária para casa ruim com sacrifício | Comum em ataques ao rei |
+| **Interferência** (interference) | Peça menor entra entre duas adversárias quebrando coordenação | Mais raro, mas elegante |
+| **Sobrecarga** (overloading) | Peça defendendo dois alvos ao mesmo tempo, removida de um perde o outro | Damas e torres tipicamente sobrecarregadas |
+| **Peça presa** (trapped piece) | Peça sem casas legais ou seguras de fuga | Cavalo no canto, bispo após ...g6 contra Bxh6 |
+| **Zwischenzug** (lance intermediário) | Insere lance forçante (xeque ou ameaça) antes do esperado, mudando o cálculo | Quase sempre xeque ou captura inesperada |
+| **Desperado** | Peça condenada vai vender caro a vida | "já que vai morrer, leva alguém junto" |
+| **Bateria** (battery) | Duas peças alinhadas na mesma direção — dama+bispo, torre+torre | Concentra força numa linha |
+| **X-ray** | Peça atrás de outra que pode "ver através" se a da frente sair | Próximo ao conceito de cravada/espeto |
+| **Ataque duplo** (double attack) | Conceito-pai: qualquer lance que crie duas ameaças simultâneas | Garfo é um caso particular |
+| **Mate da fila do fundo** (back rank) | Mate por torre/dama na 1ª/8ª linha contra rei sem fuga | Procurar rei roque-curto sem janela de peão recuado |
+| **Mate sufocado / Philidor** (smothered) | Cavalo dá mate com peças próprias bloqueando o rei | Sequência clássica: Cf7+ Rg8 Ch6+ Rh8 Dg8+ Txg8 Cf7# |
+| **Sacrifício grego** (Greek gift, Bxh7+/Lxh7+) | Sacrifício de bispo em h7 contra rei roque-curto | Padrão "clássico": peões e2-e3-e5 brancos, dama em c2/d3, cavalo em f3 |
+| **Mate de Anastasia** | Cavalo+torre matando rei na 8ª (ou 1ª) com peão próprio bloqueando | Ce7+ + torre na lateral |
+| **Mate de Boden** | Dois bispos cruzados matando rei castelado | Após sacrifício em a3/h3 |
+| **Mate árabe** | Cavalo+torre, torre dá mate, cavalo guarda fuga | Comum em finais |
+| **Catavento** (windmill) | Sequência de descobertos consecutivos | Lendário: Torre+Bispo |
+
+**Como usar na narrativa:** "No ply 34 vs Schmucki1, jogou Rb4 — perdeu a oportunidade de Rxa6 (espeto contra o rei adversário em a8 e a torre em a4)."
+
+---
+
+## 12. Biblioteca de conceitos estratégicos posicionais (use o nome canônico)
+
+Conceitos do livro de Soltis ("Pawn Structure Chess") e Kmoch ("Pawn Power in Chess"). Quando o JSON tem `position_features` indicando uma das estruturas abaixo, **cite pelo nome** e descreva o tratamento clássico.
+
+### Estruturas de peões (esqueleto da posição)
+- **Peão dama isolado / IQP** (peão branco em d4 sem c-peão, ou preto em d5 sem c-peão): vantagem dinâmica para o lado que tem (atividade, casas e4/e5/c5), desvantagem estática (peão fraco a longo prazo). Lado fraco: bloquear em d5/d4 com cavalo, trocar peças, simplificar. Lado forte: atacar antes do final.
+- **Peões pendurados / hanging pawns** (par de peões c+d ou e+f sem peões adjacentes): força dinâmica enquanto avançam juntos; fraqueza estrutural se forçados a parar. Tratamento: avançar (c5 ou d5) na hora certa; lado contrário busca bloqueio.
+- **Peão atrasado** (backward pawn): peão que não pode avançar com segurança. Casa à frente vira ponto fraco. Lado fraco: trocar; lado forte: ocupar a casa com peça.
+- **Peões dobrados**: perde flexibilidade, mas abre coluna semi-aberta para a torre. Compensação se houver controle dessa coluna.
+- **Peão passado** (passed pawn): peão sem peões adversários na sua coluna ou nas adjacentes na frente. Cresce em valor conforme avança. **Princípio Nimzowitsch**: "peão passado deve ser bloqueado, idealmente por cavalo".
+- **Peão passado protegido** (protected passed pawn): peão passado defendido por outro peão. Vantagem decisiva na maioria dos finais.
+- **Ilhas de peões** (pawn islands): grupos de peões separados. Menos ilhas = estrutura mais saudável.
+- **Cadeia de peões** (pawn chain): peões diagonais conectados (ex: e4-d3 brancos). Tratamento: atacar a base, não a cabeça.
+- **Alavanca de libertação** (liberation lever, Kmoch): movimento de ruptura de peão (ex: c5 contra IQP) que altera a estrutura abruptamente.
+
+### Conceitos posicionais não-estruturais
+- **Avanço/posto** (outpost): casa apoiada por peão próprio onde adversário não pode atacar com peão. Cavalo avançado em outpost (ex: cavalo branco em d5 com peão em c4 ou e4) vale uma menor.
+- **Casa fraca** (weak square): casa que adversário não pode mais atacar com peão. Vira posto natural.
+- **Debilidade de cor** (color complex weakness): faltam peões de uma cor → diagonais dessa cor ficam vulneráveis. Frequente após ...g6 sem bispo de casas pretas.
+- **Coluna aberta**: sem peões. Domínio = torre dobrada, depois 7ª fila.
+- **Coluna semi-aberta**: sem seu peão, com adversário. Boa para pressão.
+- **Par de bispos vs par de cavalos**: par de bispos vale ~0.5 peão a mais em posições abertas; cavalos preferem posições fechadas.
+- **Bispo mau** (bad bishop): bispo bloqueado pelos próprios peões na cor dele. Ex: bispo de casas pretas com peões em e6/d5/c6 nas casas pretas.
+- **Bispo bom** (good bishop): bispo com diagonais livres.
+- **Ataque de minoria** (minority attack): poucos peões avançam contra muitos para criar fraquezas. Clássico: brancos com peões em a2/b2 contra pretos com a7/b7/c6 — brancos jogam b4-b5 para criar peão fraco em c6.
+- **Princípio das duas fraquezas** (Capablanca/Karpov): para vencer posição igual, crie segunda fraqueza no flanco oposto. Adversário não consegue defender ambos.
+- **Restrição** (restriction, Petrosian): limitar mobilidade adversária antes de atacar. h3/a3 para negar casas de cavalo.
+- **Profilaxia** (prophylaxis, Nimzowitsch → Dvoretsky): prever plano adversário e neutralizar antes. Ver §15.
+- **Sacrifício de qualidade** (exchange sacrifice): trocar torre por menor por compensação posicional. Estilo Petrosian.
+- **Iniciativa**: ditar o ritmo, forçar respostas. Vale mais que material em curto prazo.
+
+---
+
+## 13. As 7 técnicas posicionais magistrais
+
+Síntese de Karpov, Botvinnik, Petrosian, Alekhine, Capablanca, Carlsen. Quando uma partida paradigmática se encaixa numa destas, **cite pelo nome**.
+
+1. **Otimização Posicional Absoluta** (Karpov): cada peça na sua casa ideal antes de operação tática. Princípio: melhorar a pior peça primeiro. Sintoma de jogador 1500–1800 que falha aqui: peças desenvolvem para casas "naturais" (Cf3, Bc4) sem reavaliar se ainda são ótimas após o adversário se desenvolver.
+2. **Hegemonia do Centro Expandido**: controle de pelo menos 2 das 4 casas centrais (d4-e4-d5-e5) + influência sobre o "grande centro" (c3-c6-f3-f6). Operações nos flancos só após centro estabilizado.
+3. **Pressão Contínua nas Fraquezas**: ao identificar/criar fraqueza posicional, todas as peças convergem para pressioná-la. Não é apenas sobre material — é sobre forçar o adversário a defender perpetuamente, drenando energia mental.
+4. **Provocação Profilática e Psicológica**: induzir o adversário a criar fraquezas desnecessárias (ex: forçar h6 ou a6 desnecessários). "Aparência de agressão sem material em jogo, gerando erros espontâneos."
+5. **Asfixia Posicional e Restrição** (Petrosian, Botvinnik): suprimir contrajogo até zero. Permite executar planos próprios com simplicidade clínica. O adversário fica sem ar e não tem como buscar tática.
+6. **Lances de Propósito Múltiplo e Regra das Duas Fraquezas** (Alekhine): operar em ambos os flancos simultaneamente. Quando um lance só serve a um plano, é fraco; quando serve a dois, é magistral.
+7. **Transição Cirúrgica para Finais Técnicos Ganhos**: trocar peças no momento certo, ciente de que defeitos estruturais (peão dobrado, isolado, bispo mau) viram fatais em finais. **Carlsen é o paradigma vivo** disso.
+
+---
+
+## 14. Estruturas de peões clássicas — atalhos de plano
+
+Por trás de toda abertura há uma estrutura típica. Conhecer a estrutura = saber o plano sem calcular.
+
+| Estrutura | Aberturas que geram | Plano padrão |
+|---|---|---|
+| **Carlsbad** (peão branco em c3/d4/e3, preto em c6/d5/e6) | Defesa Damiana, QGD Exchange | Brancas: ataque de minoria b4-b5. Pretas: ataque ao rei com cavalos centrais. |
+| **Tipo IQP** | Ataque Tarrasch, certas linhas QGA | Lado com IQP: peças ativas, ataque ao rei. Lado contrário: bloqueio em d4/d5, simplificação. |
+| **Estonado** (peões e+d adversários travados) | Francesa Avançada, Caro-Kann Avançada | Brancas: flanco-rei (f4-f5). Pretas: flanco-dama (c5, contra ataque na base). |
+| **Maroczy Bind** (brancas com c4+e4) | Siciliana Acelerada, Inglesa | Brancas controlam d5, espaço imenso. Pretas: trocar peças, buscar rupturas (...b5 ou ...d5). |
+| **Stonewall** (peões em c3/d4/e3/f4 ou c6/d5/e6/f5) | Holandesa Stonewall, Caro-Kann Stonewall | Lado branco: ataque ao rei pelo flanco-rei (Cf3-Ce5). Casa e5/e4 imbatível. |
+| **King's Indian formation** (pretas com d6+e5+g6) | Defesa Índia do Rei | Pretas: ataque ao rei (f5-f4-g5-g4). Brancas: flanco-dama (c5, b4). |
+| **Defesa Berlim** (final de damas trocadas cedo) | Berlim Wall (Lopez) | Manobras lentas, valoriza par de bispos. |
+
+Quando o JSON mostra família de abertura recorrente, **cite a estrutura típica e o plano correspondente** em vez de só nomear a abertura.
+
+---
+
+## 15. Profilaxia (Nimzowitsch → Dvoretsky) — ferramenta de elite
+
+Técnica que separa 1800 de 2200. Hoje no `theory.md` aparecia só como vocabulário; aqui detalhada.
+
+**Versão Nimzowitsch (clássica, "Mein System")**:
+- Antecipar plano adversário antes de mexer suas peças.
+- **Supercontrole**: sobrepoteger pontos fortes próprios (ex: e4 protegido 3x).
+- **Restrição sistemática**: avançar peões marginais (h3, a3) para negar casas a cavalos adversários.
+
+**Versão Dvoretsky (moderna, "School of Future Champions")**:
+- Pergunta cética: *"Se meu oponente pudesse jogar 2 lances seguidos sem oposição, qual seria a configuração ideal dele nesta estrutura?"*
+- Visualizando o design ótimo do inimigo, o jogador age **antes** que ele organize, não em reação.
+
+**Quando invocar na narrativa:**
+- Jogador comete erro porque ignorou ameaça que adversário poderia montar (não montou ainda) → "**Falta profilaxia**: o jogador não anteciperou que ..."
+- Adversário dominou via supercontrole/restrição → "Nimzowitsch chamaria isso de **asfixia posicional**: o adversário restringiu sistematicamente as casas de cavalo do jogador (h3, a3) antes de qualquer operação ativa."
+
+Para faixas <1500, **não recomende profilaxia** — é técnica de 1800+. Para 1500–1800, mencione como "próximo nível". Para 1800+, use ativamente.
+
+---
+
+## 16. Teoria dos Plys (Kuljasevic) — método estruturado de cálculo
+
+Usar quando o JSON mostra padrão de erro tático recorrente.
+
+**Etapa 1 — 1-Ply (Lances Candidatos)**:
+- Mapear todos os lances pertinentes ANTES de calcular qualquer um.
+- **Hierarquia obrigatória**: xeques > capturas > ameaças de mate > lances forçantes posicionais > lances quietos.
+- Iniciar pela árvore de lances forçantes evita capivaras e economiza tempo.
+
+**Etapa 2 — 2-Ply (Pensamento Cético)**:
+- Para cada candidato, perguntar: "qual é a MELHOR resposta do adversário?"
+- Buscar ativamente o recurso mais pernicioso (zwischenzug, contra-ataque, sacrifício de desvio).
+- "Pensamento cético" = postura mental hostil às próprias ideias.
+
+**Onde os 1500–2000 perdem partidas ganhas**: no ponto cego do 2-Ply. Otimismo + wishful thinking = ignoram a melhor refutação.
+
+**Quando invocar**: derrota onde jogador montou combinação que o adversário refutou com lance "óbvio" que ele não viu. "Falha de **2-Ply**: você calculou Cd5 confiando que o adversário tomaria com peão (cxd5), mas a refutação Cxe7+ era xeque — sempre verificar xeques primeiro."
+
+---
+
+## 17. Vieses cognitivos — diagnosticar e nomear
+
+Quando uma derrota não tem causa técnica óbvia, frequentemente é viés cognitivo. Liste os 4 principais:
+
+1. **Viés do otimismo / cegueira tática**: jogador se apaixona pela própria combinação, calcula só as variantes que "funcionam". Sintoma: derrota com sacrifício injustificado nos lances 15–25.
+2. **Viés de confirmação / ancoragem**: estrutura mudou, mas jogador segue plano original. Sintoma: ataque ao rei após o adversário trocar damas (não há mais ataque possível, mas continua jogando como se houvesse).
+3. **Hubris / aversão à perda**: depois de sacrifício mal-sucedido, jogador insiste em mais sacrifícios para "justificar" o primeiro em vez de recuar. Sintoma: cascata de erros piores depois do erro inicial.
+4. **Efeito emocional / complacência**: posição vencedora afrouxa atenção. "É exatamente neste vale de relaxamento mental em posições ditas 'ganhas' que as capivaras magistrais ocorrem." Sintoma: blunder no lance 35+ de uma partida que estava 80% vencida.
+
+**Como usar**: quando a partida paradigmática de derrota mostra padrão consistente com um destes vieses, **cite o viés pelo nome**. "Esta partida é um caso clássico de **viés do otimismo**: ..."
+
+**Para o redator de `report-myself`**: indicar exercício prático contra o viés diagnosticado — ex: para otimismo, tarefa "antes de cada sacrifício, escrever no caderno 3 motivos que o adversário pode usar para refutar".
+
+---
+
+## 18. Currículo 45-45-10 (referência para Seção 11 / plano de estudo)
+
+Framework canônico para jogadores 1500–2000 buscando título FIDE. Em `report-myself` Seção 11, ancorar prescrições nessa proporção:
+
+- **45% Estudo** — absorção de novos conceitos, repertório, táticas (Yusupov, Aagaard), estudos de finais (Dvoretsky).
+- **45% Prática** — partidas reais (mínimo 1 séria/semana, rapid ou clássico — não bullet).
+- **10% Correção** — análise crítica das próprias partidas. *"Onde a esmagadora maioria dos amadores falha por aversão ao confronto com os próprios erros."*
+
+Variações por semana: pode dedicar 100% a um item específico (ex: reconstrução de repertório), mas ao longo do mês a média deve seguir a proporção.
+
+Quando o jogador tem perfil "joga muito, estuda pouco" (ex: 200 partidas em 30 dias, score baixo), **prescrever inversão**: 1 semana inteira só de estudo + análise. O acúmulo de partidas sem correção apenas cristaliza maus hábitos.
+
+---
+
+## 19. Autores e obras canônicas para citar (autoridade)
+
+Use o nome da obra/autor quando aplicável. Aumenta peso da prescrição.
+
+| Autor | Obra | Quando invocar |
+|---|---|---|
+| **Capablanca** | *Chess Fundamentals* | Princípios posicionais básicos, técnica de finais simples |
+| **Nimzowitsch** | *My System / Mein System* | Profilaxia, blockade, supercontrole, peão passado |
+| **Kmoch** | *Pawn Power in Chess* | Vocabulário estrutural (alavanca, ruptura, hanging pawns) |
+| **Soltis** | *Pawn Structure Chess* | Estruturas dinâmicas, planos por estrutura |
+| **Vukovic** | *The Art of Attack in Chess* | Ataques ao rei (Greek gift, padrões de mate) |
+| **Silman** | *How to Reassess Your Chess*, *Complete Endgame Course* | Avaliação posicional para amadores; finais progressivos por nível |
+| **Dvoretsky** | *Dvoretsky's Endgame Manual* | Bíblia de finais. Magnus reverencia. |
+| **Aagaard** | *Grandmaster Preparation* (série), *Excelling at Chess Calculation* | Cálculo estruturado, treino de candidato |
+| **Yusupov** | *Build Up Your Chess* (série em 9 volumes) | Currículo progressivo 1500 → 2200 |
+
+**Recomendação concreta**: para um jogador 1265 (perfil iniciante avançado), o caminho é Silman → Capablanca → Yusupov vol. 1–3. Não recomendar Dvoretsky/Aagaard antes de 1700+.
+
+---
+
+## 20. Position features (`position_features` no JSON)
+
+Quando o `compute.py` detecta padrões estruturais nas partidas paradigmáticas, popula `position_features_per_game`. Estrutura:
+
+```json
+{
+  "5": ["IQP-white", "opposite-castle", "open-c-file", "kingside-attack-potential"]
+}
+```
+
+Tags possíveis (ver `compute.py` para definição exata):
+- `IQP-white` / `IQP-black` — peão dama isolado
+- `hanging-pawns-white` / `hanging-pawns-black`
+- `closed-center` / `open-center` / `semi-open-center`
+- `same-side-castle` / `opposite-castle` / `uncastled-king`
+- `fianchetto-kingside` / `fianchetto-queenside`
+- `open-X-file` (X = a..h) — coluna sem peões de nenhum lado
+- `pawn-majority-queenside-white` (ou flanco-rei, ou black)
+- `bad-bishop-light` / `bad-bishop-dark`
+- `weak-color-complex-light` / `weak-color-complex-dark`
+
+**Como usar**: quando uma partida paradigmática tem `IQP-white`, a narrativa deve mencionar: *"Posição típica de IQP — você tinha vantagem dinâmica (atividade, casa e5), mas trocou peças cedo. **Soltis** ensina: o lado com IQP precisa atacar antes do final."*
+
+---
+
+## 21. Few-shot examples — bom vs. ruim por seção
+
+Trechos curtos para calibrar tom. **Use o estilo do "BOM" abaixo. Evite ostensivamente o "RUIM"**.
+
+### Seção 1 (intro) — BOM
+> "Rating médio 1264. Das 193 partidas, 135 entraram na análise. Win-rate 61,1%. Score 9,7/10 — entenda como nota onde 6 = jogou como esperado. Você está bem acima da média para 1264, o que sugere ou rating subestimado ou efeito Daily inflando a precisão. O teto real aparece em Rapid contra adversários ≥1.400 (Loustiniho 0-3). O relatório foca em três pontos: finais, plano com brancas, e Defesa Francesa."
+
+### Seção 1 — RUIM (academico, evitar)
+> "O presente relatório busca examinar, à luz da pedagogia enxadrística contemporânea e dos indicadores quantitativos colhidos a partir do banco de partidas do enxadrista, as nuances epistemológicas de sua trajetória recente, com vistas a delinear..."
+
+### Seção 6 (finais) — BOM
+> "Final é o ponto fraco: score 9,1 vs 9,8 do meio-jogo. Partida #5 vs Schmucki1 é o caso-tipo. Posição torre+peões equilibrada por 25 lances; no lance 34 jogou Rb4. **Philidor** pedia retaguarda — torre por trás do peão passado, na 6ª/3ª fila. Você jogou pela frente, perdeu o tempo crítico. 30 minutos com Dvoretsky's Endgame Manual capítulo 6 resolve."
+
+### Seção 6 — RUIM
+> "A categoria final demonstra inequívoca vulnerabilidade, conforme atestam os indicadores numéricos coletados. Recomenda-se a inserção de um regime sistemático de estudo da literatura especializada na fase derradeira do jogo..."
+
+### Seção 11 (plano) — BOM
+> "1) Philidor, Lucena, oposição. 90 minutos com Dvoretsky's Endgame Manual — caps. 6, 7, 9. Maior alavanca: 7 erros de final somem em uma semana.\n2) Trocar a Defesa Francesa por Caro-Kann ou Siciliana. 9 jogos com 33% win-rate é amostra suficiente para concluir incompatibilidade de estilo: estrutura travada da Francesa não combina com seu jogo direto..."
+
+### Seção 11 — RUIM
+> "Recomenda-se ao enxadrista uma reformulação curricular abrangente, contemplando o estudo aprofundado da fase final de jogo, a reavaliação meticulosa do repertório de aberturas e o aprimoramento sistemático de habilidades táticas..."
+
+### Sobre invocar autoridade — BOM
+> "Tipo de erro 'wishful thinking' clássico — Kuljasevic na **Teoria dos Plys** identifica esse exato padrão como falha de 2-Ply: o jogador calcula a própria combinação mas não busca ativamente a refutação."
+
+### Sobre invocar autoridade — RUIM
+> "Conforme atestam diversos teóricos consagrados da pedagogia enxadrística, este tipo de equívoco encontra-se intimamente relacionado a uma série de fenômenos cognitivos amplamente estudados na literatura especializada..."
+
+**Princípio**: cita autor/obra quando ANCORA a recomendação prática (Kuljasevic = método de cálculo, Soltis = estrutura, Dvoretsky = final, Capablanca = técnica). Não cita só para parecer culto.

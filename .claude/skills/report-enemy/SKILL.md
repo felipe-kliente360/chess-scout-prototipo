@@ -10,7 +10,19 @@ Gerar um dossiê PDF, em PT-BR, com a perspectiva **"este é meu adversário, me
 
 ## Princípios de redação
 
-Antes de redigir, **leia obrigatoriamente** [`../_chess_shared/theory.md`](../_chess_shared/theory.md). Faixas de Score, profundidade ECO e padrões por rating estão lá.
+Antes de redigir, **leia obrigatoriamente em ordem**:
+
+1. [`../_chess_shared/theory.md`](../_chess_shared/theory.md) — referência conceitual e de faixas. Em particular as seções §11–21 (motivos táticos, conceitos estratégicos, 7 técnicas posicionais, profilaxia, vieses cognitivos, autores canônicos, position_features, few-shot examples).
+2. [`../../../examples/teorico-academico.pdf`](../../../examples/teorico-academico.pdf) — tratado de referência. **Use como fonte de autoridade positiva** (Teoria dos Plys, 7 técnicas posicionais magistrais, vieses cognitivos do oponente), **não como modelo de tom** (tom é direto e operacional).
+
+### Como integrar a profundidade teórica no dossiê de combate
+
+- **Seção 2 (forças):** se `position_features` mostra que ele se sai bem em IQP/closed-center/etc., cite a estrutura pelo nome e a técnica posicional dominante. Ex: "Em estruturas IQP a favor dele, ele aplica a Hegemonia do Centro Expandido (§13.2 do tratado): controla d4/e4 e ataca a partir disso."
+- **Seção 3 (vulnerabilidades):** mapeie os vieses cognitivos dele. Ex: "Padrão de derrota recorrente: viés do otimismo (§17 theory.md) — sacrifica e calcula só as variantes que funcionam, ignora refutações concretas."
+- **Seção 6 (padrões de derrota):** diagnostique falhas de 2-Ply (Teoria dos Plys, §16). Quando ele perde para zwischenzug ou contra-ataque que ignorou, cite isso pelo nome.
+- **Seção 9 (plano de combate):** invoque uma das 7 técnicas posicionais como instrução tática. Ex: "Aplique Restrição (técnica 5, Petrosian/Botvinnik) — neutralize o cavalo dele com h3/a3 antes de qualquer ofensiva."
+- **Seção 10 (armadilhas):** cite o motivo tático canônico que você quer induzir. Ex: "Tente sacrifício grego (Bxh7+) se ele castelar curto sem estrutura defensiva — vimos que ele cai em padrões clássicos."
+- **Cite obras** (Soltis para estruturas, Vukovic para ataques, Dvoretsky para finais) quando ANCORAR a recomendação tática.
 
 Diretrizes específicas para perspectiva "enemy":
 

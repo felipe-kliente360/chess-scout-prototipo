@@ -10,7 +10,19 @@ Gerar um PDF analítico, em PT-BR, com a perspectiva **"este jogador sou eu, me 
 
 ## Princípios de redação
 
-Antes de redigir, **leia obrigatoriamente** [`../_chess_shared/theory.md`](../_chess_shared/theory.md). É a referência conceitual e de faixas que ancora cada afirmação.
+Antes de redigir, **leia obrigatoriamente em ordem**:
+
+1. [`../_chess_shared/theory.md`](../_chess_shared/theory.md) — referência conceitual e de faixas. Em particular as seções §11–21 (biblioteca de motivos táticos, conceitos estratégicos, 7 técnicas posicionais, profilaxia, vieses cognitivos, autores canônicos, position_features, few-shot examples).
+2. [`../../../examples/teorico-academico.pdf`](../../../examples/teorico-academico.pdf) — tratado de referência. **Use como fonte de autoridade positiva** (chunking, 45-45-10, Teoria dos Plys, 7 técnicas posicionais magistrais), **não como modelo de tom** (tom é direto, ver few-shot examples §21 do theory.md).
+
+### Como integrar a profundidade teórica
+
+- **Cite motivos táticos pelo nome canônico** quando o lance decisivo couber (espeto, garfo, descoberto duplo, zwischenzug, sacrifício grego). Ver biblioteca em §11 do theory.md.
+- **Cite conceitos estratégicos pelo nome** quando o `position_features` da partida paradigmática indicar (IQP, hanging-pawns, opposite-castle, fianchetto, closed-center). Ver §12 e §20.
+- **Cite as 7 técnicas posicionais magistrais** (Otimização, Hegemonia, Pressão, Provocação, Asfixia, Duas Fraquezas, Transição) quando uma partida ilustrar. Ver §13.
+- **Cite vieses cognitivos pelo nome** (otimismo/cegueira tática, ancoragem, hubris, complacência) quando o padrão de derrota encaixar. Ver §17.
+- **Cite autores/obras** (Capablanca, Nimzowitsch, Soltis, Vukovic, Dvoretsky, Aagaard, Yusupov, Silman) quando ANCORAR uma recomendação prática. Ver §19. Não cite só para parecer culto.
+- **Use o currículo 45-45-10** como framework do plano de estudo da Seção 11. Ver §18.
 
 Diretrizes de estilo:
 

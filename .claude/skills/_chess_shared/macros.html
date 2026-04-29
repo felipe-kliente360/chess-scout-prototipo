@@ -121,6 +121,11 @@
     {{ g.date }} · cor{{ ' dele' if my_pronoun != 'você' else '' }}: {{ g.color }} · {{ g.time_class }} · score {{ g.score_10 }}/10 · {{ g.n_user_moves }} lances
     {% if g.url %}· <a href="{{ g.url }}">link</a>{% endif %}
   </div>
+  {% if g.position_features %}
+  <div style="font-size:8.5pt;color:#666;margin:2px 0 4px">
+    <b>Estrutura:</b> {% for f in g.position_features %}<code style="background:#f0eada;padding:1px 4px;border-radius:2px;font-size:8pt">{{ f }}</code> {% endfor %}
+  </div>
+  {% endif %}
   {% set key = 'game_' ~ g.game_index %}
   {% if narratives and narratives[key] %}
     {{ narratives[key] | nl2p | safe }}
