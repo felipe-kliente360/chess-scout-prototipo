@@ -54,6 +54,59 @@ CREATE TABLE IF NOT EXISTS position_cache (
   PRIMARY KEY (fen_key, depth)
 );
 CREATE INDEX IF NOT EXISTS idx_cache_fen ON position_cache(fen_key);
+
+-- ── Persistência de partidas e análises por jogo ──────────────────────────
+-- Substitui o pipeline CSV: o browser grava games após fetch do chess.com
+-- e game_analyses após cada análise Stockfish. compute.py lê daqui em modo
+-- --from-db (não precisa exportar/copiar CSV). Dedup automático: ao buscar
+-- partidas, conferir games.game_id antes de re-fetch; ao analisar, conferir
+-- game_analyses(game_id, ply, depth) e pular se depth atual ≥ requisitado.
+
+CREATE TABLE IF NOT EXISTS games (
+  game_id TEXT PRIMARY KEY,           -- chess.com URL ou hash do PGN
+  username TEXT NOT NULL,
+  date TEXT NOT NULL,                 -- '2026-04-15'
+  color TEXT NOT NULL,                -- 'White'|'Black'
+  opponent TEXT NOT NULL,
+  opponent_rating INTEGER,
+  my_rating INTEGER,
+  result TEXT NOT NULL,               -- 'Win'|'Loss'|'Draw'
+  termination TEXT,
+  time_control TEXT,
+  time_class TEXT,                    -- 'blitz'|'rapid'|'daily'|'bullet'
+  opening TEXT,
+  eco TEXT,
+  eco_ply INTEGER,
+  eco_family TEXT,
+  url TEXT,
+  pgn TEXT,
+  fetched_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_games_user ON games(username, date);
+CREATE INDEX IF NOT EXISTS idx_games_user_class ON games(username, time_class);
+
+CREATE TABLE IF NOT EXISTS game_analyses (
+  game_id TEXT NOT NULL,
+  ply INTEGER NOT NULL,
+  side_to_move TEXT NOT NULL,
+  move_san TEXT,
+  move_uci TEXT,
+  fen_before TEXT NOT NULL,
+  depth INTEGER NOT NULL,
+  evaluation TEXT,
+  mate TEXT,
+  best_move TEXT,
+  continuation TEXT,
+  tactical_theme TEXT,
+  tactical_confidence REAL,
+  tactical_source TEXT,
+  position_facts TEXT,           -- JSON list[dict] com fatos estruturais; vazio se loss_cp < 50
+  analyzed_at TEXT NOT NULL,
+  PRIMARY KEY (game_id, ply)
+);
+CREATE INDEX IF NOT EXISTS idx_ga_game ON game_analyses(game_id);
+-- Acelera games_needing_analysis e dedup-map (MIN/MAX(depth) por game_id):
+CREATE INDEX IF NOT EXISTS idx_ga_game_depth ON game_analyses(game_id, depth);
 """
 
 
@@ -104,12 +157,18 @@ def cache_stats(conn: sqlite3.Connection) -> dict:
 
 
 def open_db(db_path: str | Path) -> sqlite3.Connection:
-    """Abre conexão e garante schema (idempotente)."""
+    """Abre conexão e garante schema (idempotente). Aplica migrations leves
+    (ALTER TABLE ADD COLUMN) para DBs criados antes de novas colunas existirem."""
     p = Path(db_path)
     p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(p))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    # Migrations idempotentes — ADD COLUMN só se ainda não existe.
+    existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(game_analyses)")}
+    if "position_facts" not in existing_cols:
+        conn.execute("ALTER TABLE game_analyses ADD COLUMN position_facts TEXT")
+        conn.commit()
     return conn
 
 
@@ -206,3 +265,258 @@ def fetch_player(conn: sqlite3.Connection, username: str) -> dict | None:
 def list_players(conn: sqlite3.Connection) -> list[dict]:
     cur = conn.execute("SELECT * FROM players ORDER BY last_seen DESC")
     return [dict(r) for r in cur.fetchall()]
+
+
+# ── Persistência de partidas + análises (substitui CSV) ──────────────────
+
+GAME_COLUMNS = (
+    "game_id", "username", "date", "color", "opponent",
+    "opponent_rating", "my_rating", "result", "termination",
+    "time_control", "time_class", "opening", "eco", "eco_ply",
+    "eco_family", "url", "pgn", "fetched_at",
+)
+
+
+def upsert_game(conn: sqlite3.Connection, game: dict) -> None:
+    """Insere ou atualiza uma partida. game_id deve estar presente (use url)."""
+    if not game.get("game_id"):
+        game = dict(game)
+        game["game_id"] = game.get("url") or ""
+    if not game["game_id"]:
+        return
+    game.setdefault("fetched_at", datetime.now().isoformat(timespec="seconds"))
+    cols = ", ".join(GAME_COLUMNS)
+    placeholders = ", ".join(["?"] * len(GAME_COLUMNS))
+    update = ", ".join(f"{c}=excluded.{c}" for c in GAME_COLUMNS if c != "game_id")
+    values = tuple(game.get(c) for c in GAME_COLUMNS)
+    # Garante que username também faça upsert na tabela players (FK soft).
+    if game.get("username"):
+        now = game["fetched_at"]
+        conn.execute("""
+          INSERT INTO players(username, first_seen, last_seen, total_cycles)
+          VALUES (?, ?, ?, 0)
+          ON CONFLICT(username) DO UPDATE SET last_seen = excluded.last_seen
+        """, (game["username"], now, now))
+    conn.execute(
+        f"INSERT INTO games ({cols}) VALUES ({placeholders}) "
+        f"ON CONFLICT(game_id) DO UPDATE SET {update}",
+        values,
+    )
+
+
+def upsert_games_batch(conn: sqlite3.Connection, games: list[dict]) -> int:
+    """Lote de upsert. Retorna número de partidas tocadas."""
+    n = 0
+    for g in games:
+        upsert_game(conn, g)
+        n += 1
+    conn.commit()
+    return n
+
+
+def existing_game_ids(conn: sqlite3.Connection, username: str,
+                      candidate_ids: list[str]) -> set[str]:
+    """Quais game_ids candidatos já estão no DB pra esse user."""
+    if not candidate_ids:
+        return set()
+    chunks = [candidate_ids[i:i+500] for i in range(0, len(candidate_ids), 500)]
+    found: set[str] = set()
+    for chunk in chunks:
+        q = ", ".join(["?"] * len(chunk))
+        cur = conn.execute(
+            f"SELECT game_id FROM games WHERE username = ? AND game_id IN ({q})",
+            (username, *chunk),
+        )
+        found |= {row["game_id"] for row in cur.fetchall()}
+    return found
+
+
+def fetch_games(conn: sqlite3.Connection, username: str,
+                time_classes: list[str] | None = None,
+                limit: int | None = None) -> list[dict]:
+    """Lê partidas do DB. Se time_classes vazio/None, retorna todas."""
+    sql = "SELECT * FROM games WHERE username = ?"
+    args: list = [username]
+    if time_classes:
+        q = ", ".join(["?"] * len(time_classes))
+        sql += f" AND time_class IN ({q})"
+        args.extend(time_classes)
+    sql += " ORDER BY date ASC, game_id ASC"
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    cur = conn.execute(sql, args)
+    return [dict(r) for r in cur.fetchall()]
+
+
+# ── game_analyses ─────────────────────────────────────────────────────────
+
+ANALYSIS_COLUMNS = (
+    "game_id", "ply", "side_to_move", "move_san", "move_uci",
+    "fen_before", "depth", "evaluation", "mate", "best_move",
+    "continuation", "tactical_theme", "tactical_confidence",
+    "tactical_source", "position_facts", "analyzed_at",
+)
+
+
+def save_analysis_batch(conn: sqlite3.Connection, rows: list[dict]) -> int:
+    """Insere/atualiza lote de lances analisados.
+    Regra de retenção: PK (game_id, ply) — sobrescreve quando depth ≥ atual,
+    ignora se a análise nova vem com depth menor que a já salva.
+    """
+    if not rows:
+        return 0
+    now = datetime.now().isoformat(timespec="seconds")
+    placeholders = ", ".join(["?"] * len(ANALYSIS_COLUMNS))
+    cols = ", ".join(ANALYSIS_COLUMNS)
+    n = 0
+    for r in rows:
+        r = dict(r)
+        r.setdefault("analyzed_at", now)
+        values = tuple(r.get(c) for c in ANALYSIS_COLUMNS)
+        # Só sobrescreve se a depth nova é >= depth salva. Senão keep existing.
+        conn.execute(f"""
+          INSERT INTO game_analyses ({cols}) VALUES ({placeholders})
+          ON CONFLICT(game_id, ply) DO UPDATE SET
+            side_to_move = excluded.side_to_move,
+            move_san = excluded.move_san,
+            move_uci = excluded.move_uci,
+            fen_before = excluded.fen_before,
+            depth = excluded.depth,
+            evaluation = excluded.evaluation,
+            mate = excluded.mate,
+            best_move = excluded.best_move,
+            continuation = excluded.continuation,
+            tactical_theme = excluded.tactical_theme,
+            tactical_confidence = excluded.tactical_confidence,
+            tactical_source = excluded.tactical_source,
+            position_facts = COALESCE(excluded.position_facts, game_analyses.position_facts),
+            analyzed_at = excluded.analyzed_at
+          WHERE excluded.depth >= game_analyses.depth
+        """, values)
+        n += 1
+    conn.commit()
+    return n
+
+
+def update_position_facts_batch(conn: sqlite3.Connection,
+                                items: list[tuple[str, int, str]]) -> int:
+    """Atualiza só a coluna position_facts de linhas existentes.
+    items = [(game_id, ply, position_facts_json), ...]. Idempotente."""
+    if not items:
+        return 0
+    n = 0
+    for game_id, ply, pf in items:
+        conn.execute(
+            "UPDATE game_analyses SET position_facts = ? WHERE game_id = ? AND ply = ?",
+            (pf, game_id, int(ply)),
+        )
+        n += 1
+    conn.commit()
+    return n
+
+
+def fetch_game_analyses(conn: sqlite3.Connection, game_id: str) -> list[dict]:
+    cur = conn.execute(
+        "SELECT * FROM game_analyses WHERE game_id = ? ORDER BY ply ASC",
+        (game_id,),
+    )
+    return [dict(r) for r in cur.fetchall()]
+
+
+def dedup_map_for_user(conn: sqlite3.Connection, username: str) -> dict:
+    """Retorna {game_id: {ply: depth}} compacto pra dedup do browser.
+    Reduz payload em ~80% vs fetch_analyses_for_user (que carrega evaluation,
+    best_move, continuation, themes — campos que o browser não precisa para
+    decidir se pula o Stockfish)."""
+    cur = conn.execute("""
+      SELECT ga.game_id, ga.ply, ga.depth
+      FROM game_analyses ga
+      JOIN games g ON g.game_id = ga.game_id
+      WHERE g.username = ?
+    """, (username,))
+    out: dict[str, dict[int, int]] = {}
+    for row in cur.fetchall():
+        out.setdefault(row["game_id"], {})[int(row["ply"])] = int(row["depth"])
+    return out
+
+
+def fetch_analyses_for_user(conn: sqlite3.Connection, username: str,
+                            min_depth: int = 0,
+                            game_ids: list[str] | None = None) -> list[dict]:
+    """Une games + game_analyses para um user. Filtra pelo depth mínimo
+    e (opcionalmente) por lista de game_ids — útil pra reduzir payload
+    quando o browser só quer dedup das partidas da sessão atual."""
+    sql = """
+      SELECT ga.*, g.username, g.date, g.color, g.opponent, g.opponent_rating,
+             g.my_rating, g.result, g.termination, g.time_class, g.url,
+             g.opening, g.eco, g.eco_ply, g.eco_family, g.pgn
+      FROM game_analyses ga
+      JOIN games g ON g.game_id = ga.game_id
+      WHERE g.username = ? AND ga.depth >= ?
+    """
+    args: list = [username, int(min_depth)]
+    if game_ids:
+        q = ", ".join(["?"] * len(game_ids))
+        sql += f" AND ga.game_id IN ({q})"
+        args.extend(game_ids)
+    sql += " ORDER BY g.date ASC, ga.game_id ASC, ga.ply ASC"
+    cur = conn.execute(sql, args)
+    return [dict(r) for r in cur.fetchall()]
+
+
+def games_needing_analysis(conn: sqlite3.Connection, username: str,
+                           target_depth: int,
+                           time_classes: list[str] | None = None) -> list[dict]:
+    """Lista games do user que ainda precisam ser analisados em target_depth.
+    Critério: a partida tem ZERO plies em depth >= target_depth, OU tem
+    pelo menos uma com depth < target_depth (precisa reanalisar).
+    """
+    sql = """
+      SELECT g.*,
+             COUNT(ga.ply) AS plies_done,
+             COALESCE(MIN(ga.depth), 0) AS min_depth_done,
+             COALESCE(MAX(ga.depth), 0) AS max_depth_done
+      FROM games g
+      LEFT JOIN game_analyses ga ON ga.game_id = g.game_id
+      WHERE g.username = ?
+    """
+    args: list = [username]
+    if time_classes:
+        q = ", ".join(["?"] * len(time_classes))
+        sql += f" AND g.time_class IN ({q})"
+        args.extend(time_classes)
+    sql += " GROUP BY g.game_id"
+    cur = conn.execute(sql, args)
+    out = []
+    for row in cur.fetchall():
+        d = dict(row)
+        # precisa analisar se nunca analisou OU se tem depth menor que o alvo
+        if d["plies_done"] == 0 or d["min_depth_done"] < target_depth:
+            out.append(d)
+    return out
+
+
+def analysis_summary(conn: sqlite3.Connection, username: str) -> dict:
+    """Resumo: total de games, com análise, profundidades cobertas, posições."""
+    out = {"username": username}
+    out["total_games"] = conn.execute(
+        "SELECT COUNT(*) AS n FROM games WHERE username = ?", (username,)
+    ).fetchone()["n"]
+    out["games_with_analysis"] = conn.execute("""
+      SELECT COUNT(DISTINCT g.game_id) AS n FROM games g
+      JOIN game_analyses ga ON ga.game_id = g.game_id
+      WHERE g.username = ?
+    """, (username,)).fetchone()["n"]
+    out["total_positions"] = conn.execute("""
+      SELECT COUNT(*) AS n FROM game_analyses ga
+      JOIN games g ON g.game_id = ga.game_id
+      WHERE g.username = ?
+    """, (username,)).fetchone()["n"]
+    cur = conn.execute("""
+      SELECT depth, COUNT(*) AS n FROM game_analyses ga
+      JOIN games g ON g.game_id = ga.game_id
+      WHERE g.username = ?
+      GROUP BY depth ORDER BY depth
+    """, (username,))
+    out["depth_distribution"] = {row["depth"]: row["n"] for row in cur.fetchall()}
+    return out

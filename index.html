@@ -194,6 +194,7 @@
   <div class="icon">♟</div>
   <h1>Chess Exporter</h1>
   <p id="subtitle">configure e busque partidas</p>
+  <p id="mode-badge" style="margin-top:8px"></p>
 </div>
 
 <div class="dashboard">
@@ -209,8 +210,8 @@
         <input type="number" id="input-target" value="50" min="1" max="500" />
       </label>
       <label>
-        Depth Stockfish
-        <input type="number" id="input-depth" value="18" min="1" max="22" />
+        Depth Stockfish <span id="depth-hint" style="color:#888;font-size:0.85em">(15 = padrão recomendado)</span>
+        <input type="number" id="input-depth" value="15" min="1" max="22" />
       </label>
       <label>
         Engine
@@ -279,6 +280,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script src="tactical-themes.js"></script>
 <script>
   const STOCKFISH_API = "https://stockfish.online/api/s/v2.php";
   const STOCKFISH_WASM_URLS = [
@@ -294,6 +296,18 @@
   let allGames = [];
   let allAnalysis = [];
 
+  // Servidor local (scripts/serve.py) é detectado quando a página é carregada
+  // via http(s) — abrir o index.html como file:// mantém o pipeline antigo de CSV.
+  const SERVER_MODE = (location.protocol === "http:" || location.protocol === "https:");
+  async function api(path, body) {
+    const opts = body !== undefined
+      ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+      : { method: "GET" };
+    const res = await fetch(path, opts);
+    if (!res.ok) throw new Error(`API ${path} → HTTP ${res.status}`);
+    return res.json();
+  }
+
   function readConfig() {
     const u = document.getElementById("input-username").value.trim();
     const t = parseInt(document.getElementById("input-target").value, 10);
@@ -302,8 +316,13 @@
     const selectedTC = Array.from(document.querySelectorAll(".tf-cb:checked")).map(cb => cb.value);
     if (!u) throw new Error("Username vazio.");
     if (!t || t < 1) throw new Error("Quantidade inválida.");
-    if (!d || d < 1 || d > 20) throw new Error("Depth deve estar entre 1 e 20.");
+    if (!d || d < 1 || d > 22) throw new Error("Depth deve estar entre 1 e 22.");
     if (!selectedTC.length) throw new Error("Selecione pelo menos um formato (bullet, blitz, rapid ou daily).");
+    // Cap total: TARGET × nFormatos ≤ 400. Evita rodar overnight sem perceber.
+    const totalGames = t * selectedTC.length;
+    if (totalGames > 400) {
+      throw new Error(`${t} × ${selectedTC.length} formatos = ${totalGames} partidas excede o limite de 400. Reduza qtd ou formatos.`);
+    }
     USERNAME = u;
     TARGET = t;
     STOCKFISH_DEPTH = d;
@@ -366,11 +385,26 @@
     const h = Math.floor(m / 60), rm = m % 60;
     return rm ? `${h}h ${rm}m` : `${h}h`;
   }
+  // Faixa de incerteza do Score conforme depth (alinhada com .claude/skills/_chess_shared/compute.py:score_uncertainty_band)
+  function depthHintLabel(d) {
+    if (!d || d < 1) return "";
+    if (d < 12)  return `(d${d} ⚠ preview — só detecta erros grosseiros, Score com incerteza ±1.5)`;
+    if (d < 15)  return `(d${d} — rápido, Score com incerteza ±1.0)`;
+    if (d < 18)  return `(d${d} ✓ padrão recomendado, incerteza ±0.5)`;
+    if (d < 20)  return `(d${d} ✓✓ análise séria, incerteza ±0.2)`;
+    return `(d${d} — referência canônica, lento)`;
+  }
+  function updateDepthHint() {
+    const d = parseInt(document.getElementById("input-depth").value, 10);
+    const el = document.getElementById("depth-hint");
+    if (el) el.textContent = depthHintLabel(d);
+  }
   function updateEstimate() {
     const t = parseInt(document.getElementById("input-target").value, 10);
     const d = parseInt(document.getElementById("input-depth").value, 10);
     const eng = document.getElementById("input-engine").value;
     const el = document.getElementById("estimate");
+    updateDepthHint();
     if (!t || !d || t < 1 || d < 1) { el.textContent = "⏱ tempo estimado: —"; return; }
     const positions = expectedTotalPositions();
     const hitRate = expectedCacheHitRate();
@@ -386,7 +420,17 @@
       : `${TARGET}/formato × ${TIME_CLASSES.size} = ~${TARGET * TIME_CLASSES.size} partidas, ~${positions} posições`;
     el.textContent = `⏱ ${engLabel} d${d} (${basis}): ${lo} – ${hi}`;
   }
+  function renderModeBadge() {
+    // Badge fica num <p> próprio (#mode-badge) pra não ser sobrescrito quando
+    // readConfig() refaz o textContent do #subtitle a cada mudança de parâmetro.
+    const el = document.getElementById("mode-badge");
+    if (!el) return;
+    el.innerHTML = SERVER_MODE
+      ? '<span style="color:#6fcf6f;background:#0a3a0a;padding:2px 8px;border-radius:3px;font-size:11px;letter-spacing:1px">SERVER MODE · history.db</span>'
+      : '<span style="color:#888;background:#222;padding:2px 8px;border-radius:3px;font-size:11px;letter-spacing:1px">FILE MODE · CSV</span>';
+  }
   document.addEventListener("DOMContentLoaded", () => {
+    renderModeBadge();
     ["input-target", "input-depth", "input-engine"].forEach(id =>
       document.getElementById(id).addEventListener("input", () => { try { readConfig(); } catch (_) {} updateEstimate(); }));
     document.getElementById("input-engine").addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); });
@@ -559,6 +603,27 @@
       log(`📚 Aberturas classificadas via ECO: ${ecoHits}/${allGames.length} (${pct}%).`);
       // Pré-carrega o cache para que a estimativa já reflita hit-rate
       await loadPositionCache();
+      // Server mode: persiste partidas no SQLite local. Idempotente — re-rodar
+      // não duplica, só atualiza fetched_at + campos de eco (caso melhorem).
+      if (SERVER_MODE) {
+        try {
+          const payload = allGames.map(g => ({
+            game_id: g.url || `${USERNAME}_${g.date}_${g.opponent}`,
+            username: USERNAME,
+            date: g.date, color: g.color, opponent: g.opponent,
+            opponent_rating: g.opponent_rating || null,
+            my_rating: g.my_rating || null,
+            result: g.result, termination: g.termination,
+            time_control: g.time_control, time_class: g.time_class,
+            opening: g.opening, eco: g.eco, eco_ply: g.eco_ply || null,
+            eco_family: g.eco_family, url: g.url, pgn: g.pgn,
+          }));
+          const r = await api("/api/games", { games: payload });
+          log(`💾 ${r.upserted} partidas persistidas em history.db.`, "log-ok");
+        } catch (e) {
+          log(`⚠ Falha ao persistir no servidor (${e.message}); continuando.`, "log-warn");
+        }
+      }
       log(`✅ Pronto! ${allGames.length} partidas coletadas.`, "log-ok");
       updateEstimate();
 
@@ -873,6 +938,9 @@
           }
           if (line === "uciok") {
             stage = "waiting-readyok";
+            // Tabela de transposição: default 16MB → 256MB. Acelera 10–20%
+            // em sequências longas (finais técnicos com transposições).
+            SFWorker.postMessage("setoption name Hash value 256");
             SFWorker.postMessage("isready");
           } else if (line === "readyok") {
             clearTimeout(initTimeout);
@@ -1053,6 +1121,17 @@
     if (!allGames.length) { log("⚠ Nenhuma partida para analisar.", "log-warn"); return; }
     try { readConfig(); } catch (e) { alert(e.message); return; }
 
+    // Warning quando estimativa > 30 min — evita "rodei 5h sem perceber".
+    // Usa o estimador já existente (estimateSecondsPerPosition + cache hit).
+    const totalPos = expectedTotalPositions();
+    const hitRate = expectedCacheHitRate();
+    const estSec = totalPos * (1 - hitRate) * estimateSecondsPerPosition(STOCKFISH_DEPTH, ENGINE);
+    if (estSec > 1800) {
+      const minStr = Math.round(estSec / 60);
+      const ok = confirm(`⏱ Estimativa: ~${minStr} min (${allGames.length} partidas, depth ${STOCKFISH_DEPTH}). Continuar?`);
+      if (!ok) { log("⚠ Análise cancelada pelo usuário.", "log-warn"); return; }
+    }
+
     const btn = document.getElementById("btn-analyze");
     const fetchBtn = document.getElementById("btn-fetch");
     btn.disabled = true; fetchBtn.disabled = true;
@@ -1070,6 +1149,11 @@
       log("Carregando cache de posições...");
       await loadPositionCache();
       log(`  ✓ ${Object.keys(positionCache).length} posições no cache local.`);
+      log("Carregando índice de temas táticos...");
+      const tacticalIdx = await TacticalThemes.loadTacticalIndex();
+      const nB = Object.keys(tacticalIdx.B || {}).length;
+      const nC = Object.keys(tacticalIdx.C || {}).length;
+      if (nB || nC) log(`  ✓ ${nB} padrões posicionais + ${nC} padrões de erro indexados.`);
       if (ENGINE === "local") {
         log("  ⏳ carregando engine WASM (primeira vez baixa ~600KB)...");
         await initStockfish();
@@ -1088,6 +1172,37 @@
         log("❌ Nenhuma posição extraível dos PGNs. Abortando.", "log-err");
         return;
       }
+
+      // Server mode: pré-carrega análises das partidas da SESSÃO ATUAL via
+      // filter ?game_ids=... — payload proporcional ao subset analisado, não
+      // ao DB inteiro do user. Em sessão típica (50 jogos novos pra user com
+      // 200 no DB) cai em ~75%.
+      const existingByGame = {};   // {game_id: {ply: rowComplete}}
+      let dbHits = 0;
+      let pendingPostBuffer = [];
+      // Flush canônico = ao terminar cada partida (alinha unidade de persistência
+      // com unidade lógica). SAFETY_NET força flush em partidas anormalmente longas
+      // (>200 plies) pra limitar janela de perda em caso de crash.
+      const POST_SAFETY_NET = 200;
+      if (SERVER_MODE) {
+        try {
+          const sessionGameIds = allGames
+            .map(g => g.url || `${USERNAME}_${g.date}_${g.opponent}`)
+            .filter(Boolean);
+          const idsParam = sessionGameIds.length
+            ? `&game_ids=${encodeURIComponent(sessionGameIds.join(","))}`
+            : "";
+          const rows = await api(`/api/analyses?username=${encodeURIComponent(USERNAME)}&min_depth=0${idsParam}`);
+          for (const r of rows) {
+            if (!existingByGame[r.game_id]) existingByGame[r.game_id] = {};
+            existingByGame[r.game_id][r.ply] = r;
+          }
+          const reused = rows.filter(r => r.depth >= STOCKFISH_DEPTH).length;
+          log(`  ✓ ${rows.length} lances já analisados em history.db nas ${sessionGameIds.length} partidas da sessão; ${reused} reutilizáveis (depth ≥ ${STOCKFISH_DEPTH}).`);
+        } catch (e) {
+          log(`  ⚠ Não foi possível ler análises pré-existentes (${e.message}).`, "log-warn");
+        }
+      }
       showCursor();
 
       for (const { game, gameIndex, moves } of gamesWithMoves) {
@@ -1101,12 +1216,38 @@
         log(`Partida ${gameIndex + 1}/${allGames.length} — ${game.opponent} (${moves.length} lances)`);
         showCursor();
 
+        const gameId = game.url || `${USERNAME}_${game.date}_${game.opponent}`;
+        const cachedForGame = existingByGame[gameId] || {};
+
         for (const mv of moves) {
-          const analysis = await analyzeFEN(mv.fen_before);
-          if (analysis.error) apiErrors++;
+          // Dedup em SQLite: se já analisado em depth >= alvo, reutiliza.
+          const cachedRow = cachedForGame[mv.ply];
+          let analysis;
+          let cameFromDb = false;
+          if (cachedRow && cachedRow.depth >= STOCKFISH_DEPTH) {
+            analysis = {
+              evaluation: cachedRow.evaluation || "",
+              mate: cachedRow.mate || "",
+              best_move: cachedRow.best_move || "",
+              continuation: cachedRow.continuation || "",
+            };
+            cameFromDb = true;
+            dbHits++;
+          } else {
+            analysis = await analyzeFEN(mv.fen_before);
+            if (analysis.error) apiErrors++;
+            if (ENGINE === "api" && ANALYZE_THROTTLE_MS) await new Promise(r => setTimeout(r, ANALYZE_THROTTLE_MS));
+          }
           analyzedPositions++;
-          if (ENGINE === "api" && ANALYZE_THROTTLE_MS) await new Promise(r => setTimeout(r, ANALYZE_THROTTLE_MS));
-          allAnalysis.push({
+          // Classificação de tema tático: usa best_move (Stockfish) sobre a posição
+          // antes do lance. Trade-off: rodar mesmo em posições de baixo loss_cp
+          // simplifica o pipeline; o relatório filtra por loss_cp depois.
+          let tactical = null;
+          if (analysis.best_move) {
+            try { tactical = TacticalThemes.classifyPosition(mv.fen_before, analysis.best_move, mv.move_uci); }
+            catch (_) { /* não bloquear análise se classificação falhar */ }
+          }
+          const record = {
             game_index: gameIndex + 1,
             game_url: game.url,
             date: game.date,
@@ -1118,12 +1259,42 @@
             move_san: mv.move_san,
             move_uci: mv.move_uci,
             fen_before: mv.fen_before,
-            depth: STOCKFISH_DEPTH,
+            depth: cameFromDb ? cachedRow.depth : STOCKFISH_DEPTH,
             evaluation: analysis.evaluation,
             mate: analysis.mate,
             best_move: analysis.best_move,
             continuation: analysis.continuation || "",
-          });
+            tactical_theme: tactical ? tactical.theme : "",
+            tactical_confidence: tactical ? tactical.confidence : "",
+            tactical_source: tactical ? tactical.source : "",
+          };
+          allAnalysis.push(record);
+
+          // Server mode: enfileira pra POST. Só envia se foi análise nova
+          // (evita re-postar o que já veio do DB).
+          if (SERVER_MODE && !cameFromDb && analysis.best_move) {
+            pendingPostBuffer.push({
+              game_id: gameId,
+              ply: mv.ply,
+              side_to_move: mv.color,
+              move_san: mv.move_san,
+              move_uci: mv.move_uci,
+              fen_before: mv.fen_before,
+              depth: STOCKFISH_DEPTH,
+              evaluation: analysis.evaluation || null,
+              mate: analysis.mate ? String(analysis.mate) : null,
+              best_move: analysis.best_move || null,
+              continuation: analysis.continuation || null,
+              tactical_theme: tactical ? tactical.theme : null,
+              tactical_confidence: tactical ? tactical.confidence : null,
+              tactical_source: tactical ? tactical.source : null,
+            });
+            // Safety net: só dispara em partidas anormalmente longas
+            if (pendingPostBuffer.length >= POST_SAFETY_NET) {
+              try { await api("/api/analyses", { rows: pendingPostBuffer }); } catch (_) {}
+              pendingPostBuffer = [];
+            }
+          }
 
           if (analyzedPositions % 10 === 0) {
             removeCursor();
@@ -1131,13 +1302,32 @@
             showCursor();
           }
         }
+        // Flush por partida: alinha unidade de persistência com unidade lógica.
+        // Reduz commits desnecessários e elimina batch que cruza partidas.
+        if (SERVER_MODE && pendingPostBuffer.length) {
+          try { await api("/api/analyses", { rows: pendingPostBuffer }); } catch (_) {}
+          pendingPostBuffer = [];
+        }
       }
 
       removeCursor();
+      // Flush final do buffer pendente
+      if (SERVER_MODE && pendingPostBuffer.length) {
+        try {
+          const r = await api("/api/analyses", { rows: pendingPostBuffer });
+          log(`💾 ${r.saved} lances persistidos no servidor (último batch).`, "log-ok");
+        } catch (e) {
+          log(`⚠ Falha no flush final (${e.message}); ${pendingPostBuffer.length} lances ficaram em memória.`, "log-warn");
+        }
+        pendingPostBuffer = [];
+      }
       const totalForRate = cacheStats.hits + cacheStats.misses;
       const hitRate = totalForRate ? Math.round(100 * cacheStats.hits / totalForRate) : 0;
       log(`✅ Análise concluída: ${analyzedPositions} posições${apiErrors ? ` (${apiErrors} com falha API)` : ""}.`, "log-ok");
-      log(`📦 Cache: ${cacheStats.hits} hits / ${cacheStats.misses} misses (${hitRate}% reaproveitado).`, "log-ok");
+      if (SERVER_MODE && dbHits) {
+        log(`🗄  Reuso de history.db: ${dbHits} lances (${Math.round(100*dbHits/analyzedPositions)}%) puxados sem rodar Stockfish.`, "log-ok");
+      }
+      log(`📦 Cache de posições (JSON): ${cacheStats.hits} hits / ${cacheStats.misses} misses (${hitRate}% reaproveitado).`, "log-ok");
       printApiDiagnostics();
     } catch (e) {
       removeCursor();

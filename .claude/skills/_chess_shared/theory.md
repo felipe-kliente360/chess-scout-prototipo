@@ -4,16 +4,52 @@ Este documento é referência obrigatória para quem redige as seções narrativ
 
 ---
 
-## 1. Como ler o Score (0–10) — calibrado por depth e rating
+## 1. Como ler o Score (0–10) — três variantes calibradas
 
-**Score 10** mede **performance vs. expectativa para o seu rating**, não acurácia absoluta. Calibrado por dois ajustes:
+A partir do ciclo 2026-04-29, o `compute.py` produz **três scores** para auditar viés de adversário e formato. Todas usam a mesma fórmula:
 
 1. ACPL medido é normalizado para o equivalente em depth 20 (motor mais raso encontra menos erros — `depth_factor`).
-2. Comparado ao ACPL típico esperado para a faixa de rating do jogador (`expected_acpl(rating) = 130 * exp(-rating/1200)`).
+2. Comparado ao ACPL típico esperado para o rating do jogador (`expected_acpl(rating) = 130 * exp(-rating/1200)`).
+3. Fórmula final: `score = 10 * exp(-(acpl_d20 / expected_acpl) / 2)`.
 
-Fórmula final: `score = 10 * exp(-(acpl_d20 / expected_acpl) / 2)`. Calculado no JSON em `c.kpis.score_10`, `c.by_phase[*].score_10`, etc. **Não cite ACPL no texto narrativo** — sempre Score.
+**As três variantes diferem só no conjunto de partidas que entra no ACPL:**
 
-Glose única ao introduzir: *"score de 0 a 10 que compara seu nível de erro com o esperado para o seu rating — 6 = jogou como esperado, acima = jogou melhor, abaixo = jogou pior"*. Use **uma vez** na Seção 1 e nunca mais explique.
+| Variante | Campo JSON | O que filtra |
+|---|---|---|
+| **Geral** | `kpis.score_10_overall` (= `kpis.score_10`) | Todas as partidas relevantes. Inclui farming contra fracos e jogos atípicos. |
+| **Competitivo** | `kpis.score_10_competitive` | Só partidas com `\|opp_rating - my_rating\| ≤ max(150, 10% rating)`. Janela em `score_calibration.competitive_window_elo`. |
+| **Ponderado** | `kpis.score_10_weighted` | Todas as partidas, mas cada uma pesa `exp(-(gap/300)²)`: mesma faixa = peso 1.0; ±300 = 0.37; ±500 = 0.06. Não descarta, dilui. |
+
+**Hierarquia de qual usar no texto narrativo (a partir do ciclo 2026-04-29):**
+
+1. **Score por modalidade — média (`kpis.score_10_by_modality_avg`)**: PRIMEIRA OPÇÃO sempre que disponível (≥2 modalidades com ≥10 partidas relevantes cada). Cada modalidade entra com seu Score competitivo, e a média aritmética simples trata Blitz, Rapid, Daily, etc. como categorias independentes — sem viés de contagem (jogador com 100 partidas Daily + 20 Blitz não vê Daily dominar a média). Esse é o número que vai no parágrafo de abertura.
+2. **Spread (`kpis.score_10_modality_spread`)**: diagnóstico complementar. Spread ≥2.0 sinaliza modalidades com regimes diferentes (Daily com motor vs Blitz humano, ou farming vs jogo sério em tempos curtos). Quando ≥2.0, **separe a discussão por formato no texto** — não use a média sem ressalva. Spread <1.0 = modalidades coerentes, média confiável.
+3. **Score competitivo (`kpis.score_10_competitive`)**: fallback quando só há 1 modalidade (ou modalidades não atingem 10 partidas), e número de referência principal nas seções por fase/cor.
+4. **Score ponderado (`kpis.score_10_weighted`)**: usado no texto apenas se competitivo tem amostra pequena (`n_competitive_games < 10` mas `weighted_n_eff_games ≥ 15`). Senão, fica só para auditoria.
+5. **Score geral (`kpis.score_10_overall`)**: cite quando divergir significativamente do canônico (≥1.5 pontos) — a divergência é diagnóstico em si.
+
+**Diagnóstico por divergência:**
+- **Geral >> competitivo**: jogador está farmando (relaxa contra fracos).
+- **Geral << competitivo**: jogador enfrenta adversários acima do nível dele com frequência.
+- **Spread alto entre modalidades**: tipicamente Daily inflado vs Blitz/Rapid honesto. Recomende recoletar excluindo Daily.
+- **Convergência (todos próximos)**: número é robusto, escreva sem ressalvas.
+
+**Faixa de incerteza por depth (`kpis.score_uncertainty_band`):**
+
+Quando `stockfish_depth < 15`, o Score tem incerteza intrínseca pelo motor não detectar todos os erros. Os bands:
+- d10 → ±1.5 (relate como faixa: "Score 0,3 (faixa por depth raso: 0,3 – 1,8)")
+- d12 → ±1.0
+- d15 → ±0.5
+- d18+ → ±0.2 (negligível, omita)
+
+Em depth raso, **NÃO afirme "Score 0,3" como ponto único**; use a faixa. Se a recomendação na Seção 11 depender do número, prefira estudar primeiro com depth maior.
+
+**Atenção a ACPL implausível:** se `score_calibration.competitive_acpl < 15` em ≥30 partidas, o `sample_quality.warnings` aponta suspeita de assistência externa (uso de motor em Daily etc.). Reflita isso no texto — o problema é integridade do dado, não gap de adversário; recomende recoletar excluindo Daily.
+
+**Não cite ACPL no texto narrativo** — sempre Score. Use ACPL só em discussão de calibração, e mesmo assim com cautela.
+
+Glose única ao introduzir, na Seção 1 (com modalidade média disponível):
+*"score de 0 a 10 que compara seu nível de erro com o esperado para o seu rating — 6 = jogou como esperado, acima = jogou melhor, abaixo = pior. O número apresentado é a média entre formatos (Blitz, Rapid, Daily) calculada contra adversários do seu nível, o que neutraliza distorções por mistura de modalidades."*. Use **uma vez**.
 
 | Score | Leitura |
 |---|---|
@@ -241,7 +277,7 @@ Use os nomes canônicos. Cada motivo tem **pista de detecção** para identifica
 
 ## 12. Biblioteca de conceitos estratégicos posicionais (use o nome canônico)
 
-Conceitos do livro de Soltis ("Pawn Structure Chess") e Kmoch ("Pawn Power in Chess"). Quando o JSON tem `position_features` indicando uma das estruturas abaixo, **cite pelo nome** e descreva o tratamento clássico.
+Conceitos do livro de Soltis ("Pawn Structure Chess") e Kmoch ("Pawn Power in Chess"). Quando o JSON tem `position_facts` (ver §20) indicando uma das estruturas abaixo, **cite pelo nome** e descreva o tratamento clássico.
 
 ### Estruturas de peões (esqueleto da posição)
 - **Peão dama isolado / IQP** (peão branco em d4 sem c-peão, ou preto em d5 sem c-peão): vantagem dinâmica para o lado que tem (atividade, casas e4/e5/c5), desvantagem estática (peão fraco a longo prazo). Lado fraco: bloquear em d5/d4 com cavalo, trocar peças, simplificar. Lado forte: atacar antes do final.
@@ -394,28 +430,48 @@ Use o nome da obra/autor quando aplicável. Aumenta peso da prescrição.
 
 ---
 
-## 20. Position features (`position_features` no JSON)
+## 20. Position facts (`position_facts` no JSON) — refatorado 2026-04-29
 
-Quando o `compute.py` detecta padrões estruturais nas partidas paradigmáticas, popula `position_features_per_game`. Estrutura:
+A partir de 2026-04-29, o `compute.py` usa o módulo `position_facts.py` (24 detectores determinísticos). Cada fato é um dicionário com `kind` + campos auxiliares (cor, casa, métricas). Sem interpretação, sem peso — só geometria.
+
+**Onde os fatos aparecem no JSON computado:**
+
+1. `paradigmatic_games[*].position_facts` — fatos no FEN do meio do jogo paradigmático.
+2. `paradigmatic_games[*].key_positions[*].position_facts` — fatos em cada posição-chave (ply do `worst_move`, `swing` máximo).
+3. `kpis.position_facts_top` — top 12 fatos mais frequentes nos `worst_move` de **todas** as partidas, ordenados por contagem. Cada entrada tem `key`, `n`, `win_rate_when_present`.
+4. `kpis.position_facts_correlation` — dict completo com w/l/d por fato.
+
+**Estrutura típica de um fato:**
 
 ```json
-{
-  "5": ["IQP-white", "opposite-castle", "open-c-file", "kingside-attack-potential"]
-}
+{"kind": "isolated_pawn", "color": "w", "square": "d4"}
+{"kind": "passed_pawn", "color": "w", "square": "e5", "protected": true}
+{"kind": "open_file", "file": "c", "rooks_white": ["c1"], "rooks_black": []}
+{"kind": "bad_bishop", "color": "w", "square": "g3", "color_complex": "dark", "own_pawns_on_color": 4}
+{"kind": "long_diagonal_open", "diagonal": "h1-a8", "color": "w", "bishop": "g2"}
+{"kind": "pawn_shield_broken", "color": "w", "side": "kingside", "missing_files": ["g", "h"], "remaining": 1}
+{"kind": "piece_high_mobility", "color": "w", "piece": "B", "square": "g3", "squares_attacked": 8}
 ```
 
-Tags possíveis (ver `compute.py` para definição exata):
-- `IQP-white` / `IQP-black` — peão dama isolado
-- `hanging-pawns-white` / `hanging-pawns-black`
-- `closed-center` / `open-center` / `semi-open-center`
-- `same-side-castle` / `opposite-castle` / `uncastled-king`
-- `fianchetto-kingside` / `fianchetto-queenside`
-- `open-X-file` (X = a..h) — coluna sem peões de nenhum lado
-- `pawn-majority-queenside-white` (ou flanco-rei, ou black)
-- `bad-bishop-light` / `bad-bishop-dark`
-- `weak-color-complex-light` / `weak-color-complex-dark`
+**Catálogo dos 24 detectores** (ver `position_facts.py` para definição exata):
 
-**Como usar**: quando uma partida paradigmática tem `IQP-white`, a narrativa deve mencionar: *"Posição típica de IQP — você tinha vantagem dinâmica (atividade, casa e5), mas trocou peças cedo. **Soltis** ensina: o lado com IQP precisa atacar antes do final."*
+| Categoria | Detectores |
+|---|---|
+| Estrutura de peões | `isolated_pawn`, `doubled_pawn`, `passed_pawn`, `backward_pawn`, `pawn_chain`, `pawn_majority`, `iqp`, `hanging_pawns` |
+| Colunas e diagonais | `open_file`, `semi_open_file`, `seventh_rank`, `long_diagonal_open`, `bad_bishop`, `good_bishop` |
+| Segurança do rei | `king_in_center`, `pawn_shield_intact`, `pawn_shield_broken`, `pawn_shield_absent`, `open_file_near_king` |
+| Material/peças | `bishop_pair`, `opposite_color_bishops`, `piece_high_mobility`, `piece_low_mobility`, `static_trapped_piece` |
+| Caráter | `center_type`, `position_phase`, `castled`, `opposite_side_castles` |
+
+**Filtros internos** (já aplicados pelo módulo): em fullmove ≤ 8 são suprimidos `bad_bishop`/`good_bishop`/`piece_*_mobility`/`static_trapped_piece` (ruído de peças iniciais bloqueadas). Em ≤ 6 peças são suprimidos `open_file_near_king` (em final puro toda coluna está aberta).
+
+**Como usar na narrativa:**
+
+- **Cite o fato com a casa específica.** Em vez de "abertura é fraca", escreva *"Peão isolado em d4 e par de bispos contra (`bishop_pair:b`) — vantagem estática contrária; **Nimzowitsch** ensina que peão isolado deve ser bloqueado por cavalo."*
+- **Use `position_facts_top` na seção de pontos fortes/fracos.** Se `bishop_pair:w` aparece em 49 partidas com `win_rate_when_present` 93.9%, escreva *"Quando você tem par de bispos vence em 94% das vezes — explore ativamente posições abertas onde o par brilha."*
+- **Cruze tactical_theme com position_facts.** Se um `key_position` tem `tactical_theme: trappedPiece` E `position_facts` lista `pawn_shield_broken:w` + `long_diagonal_open`, a narrativa pode dizer *"Lance crítico: peça presa após escudo de peões quebrado e bispo adversário na diagonal longa — combinação clássica de Vukovic (`The Art of Attack`)."*
+- **Não cite fatos descritivos puros isoladamente** (`center_type`, `position_phase`, `castled`) — eles servem só para contexto. Use combinados com fatos diagnósticos.
+- **Escolha 2–3 fatos por posição na narrativa**, não exiba todos. Priorize os de maior impacto: `iqp`, `pawn_shield_broken`, `bad_bishop`, `passed_pawn`, `long_diagonal_open`, `static_trapped_piece`.
 
 ---
 
