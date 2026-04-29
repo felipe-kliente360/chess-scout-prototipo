@@ -20,6 +20,26 @@ A partir do ciclo 2026-04-29, o `compute.py` produz **três scores** para audita
 | **Competitivo** | `kpis.score_10_competitive` | Só partidas com `\|opp_rating - my_rating\| ≤ max(150, 10% rating)`. Janela em `score_calibration.competitive_window_elo`. |
 | **Ponderado** | `kpis.score_10_weighted` | Todas as partidas, mas cada uma pesa `exp(-(gap/300)²)`: mesma faixa = peso 1.0; ±300 = 0.37; ±500 = 0.06. Não descarta, dilui. |
 
+**Modelo do Score (a partir do ciclo 2026-04-29 + recalibração 2):**
+
+```
+score_10 = 10 × engine_factor × (
+  0.5 × ACPL_score    # exp(-(acpl_d20_eq / expected_acpl(rating)) / 2)
++ 0.3 × win_score     # win_rate / 100
++ 0.2 × blunder_score # 1 / (1 + bpm/5)
+)
+```
+
+Curva `expected_acpl` é empírica chess.com (não a teórica antiga). `engine_factor` = penalidade quando ACPL é implausivelmente baixo para o rating: ratio < 0.5 → desconto até piso 0.5; só aplica em amostra ≥100 lances.
+
+**`kpis.score_10` é canônico** (Opção B, eleita 2026-04-29). Hierarquia:
+
+1. `score_10_competitive` se `n_competitive_games ≥ 15` ← preferido
+2. `score_10_by_modality_avg` se ≥2 modalidades com ≥10 partidas cada
+3. `score_10_overall` como fallback
+
+`kpis.score_10_basis` documenta qual variante foi escolhida (ex: `"competitive (n=27, ±182 Elo)"`). O redator deve **citar `kpis.score_10` como o único Score** no texto narrativo, e mencionar o `score_10_basis` quando útil para justificar.
+
 **Hierarquia de qual usar no texto narrativo (a partir do ciclo 2026-04-29):**
 
 1. **Score por modalidade — média (`kpis.score_10_by_modality_avg`)**: PRIMEIRA OPÇÃO sempre que disponível (≥2 modalidades com ≥10 partidas relevantes cada). Cada modalidade entra com seu Score competitivo, e a média aritmética simples trata Blitz, Rapid, Daily, etc. como categorias independentes — sem viés de contagem (jogador com 100 partidas Daily + 20 Blitz não vê Daily dominar a média). Esse é o número que vai no parágrafo de abertura.

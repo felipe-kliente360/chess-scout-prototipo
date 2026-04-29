@@ -1366,6 +1366,24 @@ def main():
         time_classes=time_classes,
     )
 
+    # ── Score canônico (kpis.score_10) — Opção B: competitivo como base ──
+    # Hierarquia: competitivo (n≥15) > média modalidade (≥2 mods, ≥10 cada)
+    # > geral. Anota score_10_basis pra transparência: o redator e auditor
+    # sabem qual variante o número canônico está representando.
+    overall_score = compute_score10(overall_acpl, depth, player_rating,
+                                    win_rate=overall_win_rate_moves,
+                                    blunders=overall_blunders,
+                                    n_user_moves=overall_n_moves)
+    if competitive_score is not None and n_competitive >= 15:
+        canonical_score = competitive_score
+        canonical_basis = f"competitive (n={n_competitive}, ±{comp_window} Elo)"
+    elif score_modality_avg is not None and len(modality_scores) >= 2:
+        canonical_score = score_modality_avg
+        canonical_basis = f"modality_avg ({len(modality_scores)} formatos)"
+    else:
+        canonical_score = overall_score
+        canonical_basis = "overall (fallback — amostra competitiva insuficiente)"
+
     payload = {
         "username": username,
         "stamp": stamp,
@@ -1398,16 +1416,11 @@ def main():
             "win_rate": win_rate,
             "acpl": overall_acpl,
             "accuracy": overall_accuracy,
-            "score_10": compute_score10(overall_acpl, depth, player_rating,
-                                        win_rate=overall_win_rate_moves,
-                                        blunders=overall_blunders,
-                                        n_user_moves=overall_n_moves),
+            "score_10": canonical_score,
+            "score_10_basis": canonical_basis,
             "score_10_competitive": competitive_score,
             "score_10_weighted": weighted_score,
-            "score_10_overall": compute_score10(overall_acpl, depth, player_rating,
-                                                win_rate=overall_win_rate_moves,
-                                                blunders=overall_blunders,
-                                                n_user_moves=overall_n_moves),
+            "score_10_overall": overall_score,
             "score_10_by_modality_avg": score_modality_avg,
             "score_10_modality_spread": score_modality_spread,
             "score_10_by_modality_breakdown": modality_scores,
@@ -1474,11 +1487,8 @@ def main():
     print(f"✅ {out_path}")
     print(f"   ACPL={overall_acpl} | accuracy={overall_accuracy}% | "
           f"W/L/D={wins}/{losses}/{draws} | partidas paradigmáticas={len(paradigmatic)}")
-    score_overall = compute_score10(overall_acpl, depth, player_rating,
-                                    win_rate=overall_win_rate_moves,
-                                    blunders=overall_blunders,
-                                    n_user_moves=overall_n_moves)
-    print(f"   Score: geral={score_overall} | competitivo={competitive_score} (n={n_competitive}, ±{comp_window} Elo) | "
+    print(f"   Score canônico: {canonical_score}/10 — base: {canonical_basis}")
+    print(f"   Variantes: geral={overall_score} | competitivo={competitive_score} (n={n_competitive}, ±{comp_window} Elo) | "
           f"ponderado={weighted_score} (n_eff={n_eff_weighted}, σ={int(WEIGHT_SIGMA)} Elo)")
     if modality_scores:
         breakdown = " ".join(f"{tc}={s}" for tc, s in modality_scores.items())
