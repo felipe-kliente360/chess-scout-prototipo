@@ -119,12 +119,7 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 **Como:** Seção opcional "Sinais de uso de assistência" no relatório (com cuidado linguístico — não acusar, descrever padrão observado: spread por modalidade, ratio acpl/expected por formato).
 **Custo:** 4h. Sensibilidade política — pensar antes.
 
-### 9. Exportação editável (DOCX além de PDF)
-**Por quê:** treinadores querem editar o texto antes de mandar pro aluno.
-**Como:** Adicionar export DOCX usando `python-docx`. Mesmo conteúdo, formato editável.
-**Custo:** 6h.
-
-### 10. PWA + IndexedDB (cache no browser sem backend)
+### 9. PWA + IndexedDB (cache no browser sem backend)
 **Por quê:** se o browser cachear sozinho, dispensa o servidor local pra usuários casuais.
 **Como:** Service worker que mantém `position_cache` em IndexedDB; sync periódico com SQLite via download/upload manual.
 **Custo:** 1 dia. Trade-off: hoje o `serve.py` é stdlib e simples; PWA adiciona complexidade.
@@ -135,7 +130,7 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 
 ### Modelo de produto
 - **B2C** (jogador casual): prioridade 1 + 2 (backend + redação automática). Sem isso, custo unitário inviável.
-- **B2B** (treinador/clube): prioridade 3 + 5 + 9 (perspectiva coach + comparativo + DOCX).
+- **B2B** (treinador/clube): prioridade 3 + 5 (perspectiva coach + comparativo cross-jogador).
 - **Interno/amigos**: MVP atual já entrega; investir em 4 (telemetria) e 6 (Lichess).
 
 ### Modelo de cobrança (se B2C)
