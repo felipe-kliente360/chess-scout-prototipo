@@ -236,6 +236,11 @@
 
     <div id="estimate" class="log-idle">⏱ tempo estimado: —</div>
 
+    <div id="db-state" class="log-idle" style="margin-top:6px;font-size:0.85em;display:none">
+      <span id="db-state-text"></span>
+      <button id="btn-analyze-pending" type="button" onclick="analyzePending()" style="display:none;font-size:0.8em;padding:3px 8px;margin-left:6px">⚙ Analisar pendentes (sem refetch)</button>
+    </div>
+
     <div class="stats" id="stats" style="display:none">
       <div class="stat">
         <div class="stat-value win" id="stat-wins">0</div>
@@ -254,6 +259,7 @@
     <div class="actions">
       <button id="btn-fetch" onclick="fetchGames()" style="grid-column: span 2;">Buscar Partidas</button>
       <button id="btn-analyze" onclick="analyzeGames()" style="grid-column: span 2;">⚙ Analisar Stockfish</button>
+      <button id="btn-queue-backend" onclick="queueOnBackend()" style="grid-column: span 2;">⚡ Enfileirar no backend (Stockfish nativo)</button>
       <button id="btn-download-diag" onclick="downloadDiagnostics()">↓ Diag API</button>
       <button id="btn-reset" onclick="resetSession()">🔄 Nova Análise</button>
     </div>
@@ -310,6 +316,152 @@
     const res = await fetch(path, opts);
     if (!res.ok) throw new Error(`API ${path} → HTTP ${res.status}`);
     return res.json();
+  }
+
+  // Renderiza stats + tabela de prévia a partir de allGames. Chamado tanto
+  // pelo fetchGames quanto pelo analyzePending (para reusar o painel sem
+  // duplicar código de renderização).
+  function renderPreview() {
+    if (!allGames.length) return;
+    const wins = allGames.filter(g => g.result === "Win").length;
+    const losses = allGames.filter(g => g.result === "Loss").length;
+    const draws = allGames.filter(g => g.result === "Draw").length;
+    document.getElementById("stat-wins").textContent = wins;
+    document.getElementById("stat-losses").textContent = losses;
+    document.getElementById("stat-draws").textContent = draws;
+    document.getElementById("stats").style.display = "flex";
+
+    const tbody = document.getElementById("preview-body");
+    tbody.innerHTML = "";
+    allGames.slice(-5).reverse().forEach(g => {
+      const tr = document.createElement("tr");
+      const resultClass = g.result === "Win" ? "win" : g.result === "Loss" ? "loss" : "draw";
+      const resultText = g.result === "Win" ? "✓ Vitória" : g.result === "Loss" ? "✗ Derrota" : "= Empate";
+      const colorIcon = g.color === "White" ? "⬜ Brancas" : "⬛ Pretas";
+      tr.innerHTML = `
+        <td style="color:#888">${g.date}</td>
+        <td>${colorIcon}</td>
+        <td>${g.opponent}</td>
+        <td style="color:#888">${g.opponent_rating || "—"}</td>
+        <td class="${resultClass}">${resultText}</td>
+        <td style="color:#888">${g.time_class}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+    document.getElementById("preview").style.display = "block";
+    document.getElementById("btn-analyze").style.display = "block";
+  }
+
+  // Estado persistente do DB para o user atual: mostra quantas partidas
+  // já foram coletadas, quantas precisam de análise no depth alvo, e
+  // habilita botão "Analisar pendentes" sem refetch quando aplicável.
+  async function refreshDbState() {
+    const u = (document.getElementById("input-username").value || "").trim();
+    const d = parseInt(document.getElementById("input-depth").value, 10) || 15;
+    const wrap = document.getElementById("db-state");
+    const txt = document.getElementById("db-state-text");
+    const btn = document.getElementById("btn-analyze-pending");
+    if (!SERVER_MODE || !u) { wrap.style.display = "none"; return; }
+    try {
+      const summary = await api(`/api/summary?username=${encodeURIComponent(u)}`);
+      const total = summary.total_games || 0;
+      const positions = summary.total_positions || 0;
+      if (total === 0) {
+        wrap.style.display = "block";
+        txt.textContent = `📂 ${u}: nenhuma partida no DB ainda — clique "Buscar Partidas" para coletar.`;
+        btn.style.display = "none";
+        return;
+      }
+      // Quais partidas precisam de análise no depth alvo?
+      const needed = await api(`/api/analyses/needed?username=${encodeURIComponent(u)}&depth=${d}`);
+      const nNeeded = (needed || []).length;
+      wrap.style.display = "block";
+      if (nNeeded === 0) {
+        txt.textContent = `📂 ${u}: ${total} partidas no DB · ${positions} lances analisados em depth ≥ ${d} ✓`;
+        btn.style.display = "none";
+      } else {
+        txt.textContent = `📂 ${u}: ${total} partidas no DB · ${nNeeded} ainda precisam de análise em depth ${d}`;
+        btn.style.display = "inline-block";
+        btn.dataset.nPending = String(nNeeded);
+      }
+    } catch (_) { wrap.style.display = "none"; }
+  }
+
+  // Enfileira partidas pendentes no backend nativo (workers Python +
+  // Stockfish binário). Browser fecha o ciclo: posta game_ids na fila e
+  // entra em modo polling de progresso até zerar pending+running.
+  // Quem roda o worker: `python scripts/analyze_worker.py --workers 4 --depth 18`.
+  async function queueOnBackend() {
+    if (!SERVER_MODE) { alert("Servidor desligado. Rode bash scripts/start.sh."); return; }
+    const u = (document.getElementById("input-username").value || "").trim();
+    if (!u) { alert("Username vazio."); return; }
+    try { readConfig(); } catch (e) { alert(e.message); return; }
+    log("─".repeat(40), "log-idle");
+    log(`▶ Enfileirando partidas pendentes no backend nativo (${USERNAME}, depth ${STOCKFISH_DEPTH})...`);
+    try {
+      const needed = await api(`/api/analyses/needed?username=${encodeURIComponent(USERNAME)}&depth=${STOCKFISH_DEPTH}`);
+      const ids = (needed || []).map(g => g.game_id);
+      if (!ids.length) {
+        log("  ✓ Nada pendente — todas as partidas já têm análise no depth alvo.", "log-ok");
+        return;
+      }
+      const r = await api("/api/analyze/queue", {
+        username: USERNAME, game_ids: ids, target_depth: STOCKFISH_DEPTH,
+      });
+      log(`  ✓ ${r.enqueued} enfileiradas, ${r.skipped_existing} já em fila/done, ${r.reset} retomadas.`);
+      log("  ⓘ Para processar: rode em outro terminal:", "log-idle");
+      log(`     python scripts/analyze_worker.py --workers 4 --depth ${STOCKFISH_DEPTH}`, "log-idle");
+      // Polling: a cada 3s mostra progresso até pending+running == 0.
+      const poll = async () => {
+        try {
+          const p = await api(`/api/analyze/progress?username=${encodeURIComponent(USERNAME)}`);
+          const pending = (p.pending || 0) + (p.running || 0);
+          log(`  📊 progresso: pending=${p.pending} running=${p.running} done=${p.done} error=${p.error}`);
+          if (pending > 0) {
+            setTimeout(poll, 3000);
+          } else {
+            log(`  ✓ Backend concluiu: ${p.done} partidas analisadas, ${p.error} com erro.`, "log-ok");
+            refreshDbState();
+          }
+        } catch (e) {
+          log(`  ⚠ falha no polling (${e.message})`, "log-warn");
+        }
+      };
+      setTimeout(poll, 2000);
+    } catch (e) {
+      log(`❌ ${e.message}`, "log-err");
+    }
+  }
+
+  // Análise de pendentes sem refetch: usa as partidas já em history.db,
+  // monta allGames a partir delas e dispara o pipeline normal de analyzeGames.
+  async function analyzePending() {
+    const u = (document.getElementById("input-username").value || "").trim();
+    if (!SERVER_MODE) { alert("Servidor desligado. Rode bash scripts/start.sh."); return; }
+    if (!u) { alert("Username vazio."); return; }
+    try { readConfig(); } catch (e) { alert(e.message); return; }
+    log("─".repeat(40), "log-idle");
+    log(`▶ Analisando pendentes para ${USERNAME} em depth ${STOCKFISH_DEPTH} (sem refetch)`);
+    try {
+      const games = await api(`/api/games?username=${encodeURIComponent(USERNAME)}`);
+      if (!games?.length) { log("⚠ Nenhuma partida no DB para esse user.", "log-warn"); return; }
+      // Filtra pelos formatos selecionados.
+      const filtered = games.filter(g => TIME_CLASSES.has(g.time_class));
+      if (!filtered.length) { log(`⚠ Nenhuma partida nos formatos selecionados (${[...TIME_CLASSES].join("+")}).`, "log-warn"); return; }
+      allGames = filtered;
+      log(`  ✓ ${allGames.length} partidas carregadas do DB (${games.length - allGames.length} fora dos formatos selecionados).`);
+      const ecoHits = applyOpeningClassification(allGames);
+      log(`📚 Aberturas reclassificadas via ECO: ${ecoHits}/${allGames.length}.`);
+      await loadPositionCache();
+      await loadCalibration();
+      // Mostra prévia e dispara analyzeGames (que já reusa game_analyses no DB).
+      renderPreview();
+      await analyzeGames();
+    } catch (e) {
+      log(`❌ Erro ao analisar pendentes: ${e.message}`, "log-err");
+    } finally {
+      refreshDbState();
+    }
   }
 
   // Pré-get de tendência: pega últimos 60 dias do perfil chess.com,
@@ -562,7 +714,13 @@
       cb.addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); }));
     document.querySelectorAll('input[name="quota-mode"]').forEach(r =>
       r.addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); }));
+    // Username/depth mudam → recalcula estado do DB.
+    let dbStateDebounce;
+    const triggerDbRefresh = () => { clearTimeout(dbStateDebounce); dbStateDebounce = setTimeout(refreshDbState, 350); };
+    document.getElementById("input-username").addEventListener("input", triggerDbRefresh);
+    document.getElementById("input-depth").addEventListener("input", triggerDbRefresh);
     updateEstimate();
+    refreshDbState();
   });
 
   function log(msg, cls = "log-normal") {
@@ -640,6 +798,7 @@
     allAnalysis = [];
     terminateStockfish();
     updateEstimate();
+    refreshDbState();
   }
 
   async function fetchGames() {
@@ -760,36 +919,8 @@
       }
       log(`✅ Pronto! ${allGames.length} partidas coletadas.`, "log-ok");
       updateEstimate();
-
-      // Stats
-      const wins = allGames.filter(g => g.result === "Win").length;
-      const losses = allGames.filter(g => g.result === "Loss").length;
-      const draws = allGames.filter(g => g.result === "Draw").length;
-      document.getElementById("stat-wins").textContent = wins;
-      document.getElementById("stat-losses").textContent = losses;
-      document.getElementById("stat-draws").textContent = draws;
-      document.getElementById("stats").style.display = "flex";
-
-      // Preview
-      const tbody = document.getElementById("preview-body");
-      tbody.innerHTML = "";
-      allGames.slice(-5).reverse().forEach(g => {
-        const tr = document.createElement("tr");
-        const resultClass = g.result === "Win" ? "win" : g.result === "Loss" ? "loss" : "draw";
-        const resultText = g.result === "Win" ? "✓ Vitória" : g.result === "Loss" ? "✗ Derrota" : "= Empate";
-        const colorIcon = g.color === "White" ? "⬜ Brancas" : "⬛ Pretas";
-        tr.innerHTML = `
-          <td style="color:#888">${g.date}</td>
-          <td>${colorIcon}</td>
-          <td>${g.opponent}</td>
-          <td style="color:#888">${g.opponent_rating}</td>
-          <td class="${resultClass}">${resultText}</td>
-          <td style="color:#888">${g.time_class}</td>
-        `;
-        tbody.appendChild(tr);
-      });
-      document.getElementById("preview").style.display = "block";
-      document.getElementById("btn-analyze").style.display = "block";
+      renderPreview();
+      refreshDbState();
 
     } catch (e) {
       removeCursor();
@@ -1497,6 +1628,8 @@
       } else {
         log("⚠ Nenhuma análise produzida.", "log-warn");
       }
+      // Atualiza o painel "X partidas / Y pendentes" para refletir o novo estado.
+      refreshDbState();
     }
   }
 

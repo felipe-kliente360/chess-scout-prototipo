@@ -133,6 +133,26 @@ CREATE TABLE IF NOT EXISTS execution_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_exec_engine_depth ON execution_logs(engine, depth);
 
+-- ── Fila de análise nativa (Stockfish binário) ────────────────────────────
+-- Browser enfileira game_ids via /api/analyze/queue; worker(s) Python
+-- consomem em paralelo, rodam Stockfish nativo e escrevem em game_analyses.
+-- status: 'pending' (aguardando) | 'running' (worker pegou) | 'done' | 'error'.
+CREATE TABLE IF NOT EXISTS analysis_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL,
+  game_id TEXT NOT NULL,
+  target_depth INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  enqueued_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  worker_id TEXT,
+  error TEXT,
+  UNIQUE(game_id, target_depth)
+);
+CREATE INDEX IF NOT EXISTS idx_aq_status ON analysis_queue(status, enqueued_at);
+CREATE INDEX IF NOT EXISTS idx_aq_user ON analysis_queue(username, status);
+
 -- ── Cache de sections (regen rápida + economia de tokens) ─────────────────
 -- Salva o último sections.json + assinatura da amostra por (user, perspective).
 -- Em pedidos subsequentes, skill compara a assinatura e decide reusar tudo
@@ -853,6 +873,87 @@ def signature_delta_flags(prev: dict, curr: dict) -> dict:
     if changed(prev.get("time_median_s"), curr.get("time_median_s"), rel_tol=0.20):
         out["section_time_management"] = "regenerate"
 
+    return out
+
+
+# ── Fila de análise nativa ────────────────────────────────────────────────
+
+def enqueue_games_for_analysis(conn: sqlite3.Connection, username: str,
+                                game_ids: list[str], target_depth: int) -> dict:
+    """Insere game_ids na fila. Idempotente via UNIQUE(game_id, target_depth):
+    se já existe pending/running, ignora; se está 'done' ou 'error', resseta
+    para pending. Retorna {enqueued, skipped_existing, reset}."""
+    if not game_ids:
+        return {"enqueued": 0, "skipped_existing": 0, "reset": 0}
+    now = datetime.now().isoformat(timespec="seconds")
+    enqueued = skipped = reset = 0
+    for gid in game_ids:
+        existing = conn.execute(
+            "SELECT id, status FROM analysis_queue WHERE game_id = ? AND target_depth = ?",
+            (gid, int(target_depth)),
+        ).fetchone()
+        if existing is None:
+            conn.execute("""
+              INSERT INTO analysis_queue (username, game_id, target_depth, status, enqueued_at)
+              VALUES (?, ?, ?, 'pending', ?)
+            """, (username, gid, int(target_depth), now))
+            enqueued += 1
+        elif existing["status"] in ("done",):
+            skipped += 1
+        elif existing["status"] in ("error",):
+            conn.execute("""
+              UPDATE analysis_queue SET status='pending', enqueued_at=?, error=NULL,
+                started_at=NULL, finished_at=NULL, worker_id=NULL WHERE id=?
+            """, (now, existing["id"]))
+            reset += 1
+        else:
+            skipped += 1
+    conn.commit()
+    return {"enqueued": enqueued, "skipped_existing": skipped, "reset": reset}
+
+
+def claim_next_pending(conn: sqlite3.Connection, worker_id: str) -> dict | None:
+    """Atomicamente: pega o próximo job pending (FIFO), marca como running.
+    Retorna o job ou None se fila vazia. Implementação à prova de race condition
+    via UPDATE...WHERE status='pending'.
+    """
+    now = datetime.now().isoformat(timespec="seconds")
+    cur = conn.execute("""
+      UPDATE analysis_queue
+      SET status='running', started_at=?, worker_id=?
+      WHERE id = (
+        SELECT id FROM analysis_queue WHERE status='pending'
+        ORDER BY enqueued_at ASC LIMIT 1
+      )
+      RETURNING id, username, game_id, target_depth
+    """, (now, worker_id))
+    row = cur.fetchone()
+    conn.commit()
+    return dict(row) if row else None
+
+
+def mark_job_done(conn: sqlite3.Connection, job_id: int, error: str | None = None) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    status = "error" if error else "done"
+    conn.execute("""
+      UPDATE analysis_queue SET status=?, finished_at=?, error=? WHERE id=?
+    """, (status, now, error, int(job_id)))
+    conn.commit()
+
+
+def queue_progress(conn: sqlite3.Connection, username: str | None = None) -> dict:
+    """Estatísticas da fila — útil para o browser fazer polling de progresso."""
+    sql = "SELECT status, COUNT(*) AS n FROM analysis_queue"
+    args: list = []
+    if username:
+        sql += " WHERE username = ?"
+        args.append(username)
+    sql += " GROUP BY status"
+    rows = conn.execute(sql, args).fetchall()
+    out = {"pending": 0, "running": 0, "done": 0, "error": 0}
+    for r in rows:
+        out[r["status"]] = r["n"]
+    out["total"] = sum(out.values())
     return out
 
 

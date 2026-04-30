@@ -1,5 +1,32 @@
 {# Macros compartilhados entre report-myself e report-enemy. #}
 
+{% macro cheat_signals_block(cs, narrative='') %}
+{% if cs and cs.available %}
+<div style="border:1px solid {% if cs.overall_level == 'red' %}#c44{% elif cs.overall_level == 'yellow' %}#d8a000{% else %}#2a7a55{% endif %};padding:10px 14px;border-radius:4px;background:{% if cs.overall_level == 'red' %}#fdf3f3{% elif cs.overall_level == 'yellow' %}#fdf7e8{% else %}#f3faf6{% endif %};margin-top:6px">
+  <div style="font-size:9pt;color:#666;margin-bottom:6px;line-height:1.4">{{ cs.disclaimer }}</div>
+  {% if narrative %}<div style="font-size:10pt;margin-bottom:8px">{{ narrative | safe }}</div>{% endif %}
+  <table style="width:100%;font-size:9.5pt">
+    <thead>
+      <tr><th style="text-align:left">Sinal</th><th style="text-align:center;width:60px">Status</th><th style="text-align:left">Leitura</th></tr>
+    </thead>
+    <tbody>
+      {% for s in cs.signals %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td style="text-align:center">
+          {% if s.level == 'red' %}<span style="color:#c44;font-weight:600">●&nbsp;atípico</span>
+          {% elif s.level == 'yellow' %}<span style="color:#d8a000;font-weight:600">●&nbsp;atenção</span>
+          {% else %}<span style="color:#2a7a55;font-weight:600">●&nbsp;normal</span>{% endif %}
+        </td>
+        <td style="font-size:9pt;color:#444">{{ s.note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endmacro %}
+
 {% macro sample_warning(sq) %}
 {% if sq and sq.warnings %}
 <div class="sample-warn">

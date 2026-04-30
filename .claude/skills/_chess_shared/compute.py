@@ -434,6 +434,150 @@ def derive_puzzle_program(games_df, by_phase, kpis, head_to_head, time_classes):
     }
 
 
+def compute_cheat_signals(score_calibration, modality_scores, modality_spread,
+                          time_analysis, by_phase) -> dict:
+    """Sinais indiretos de uso de assistência computacional.
+
+    Cada sinal vira semáforo "green" | "yellow" | "red" + descrição curta.
+    NÃO acusa — descreve padrões observados que destoam do esperado para o
+    rating. O relatório usa esses sinais em uma seção opcional, sempre com
+    linguagem cuidadosa ("padrão observado", não "está usando motor").
+
+    Os 4 sinais:
+      1. performance_ratio — ACPL_d20 vs expected_acpl(rating). <0.6 é raro
+         para humanos abaixo de mestre; <0.4 é fortemente atípico.
+      2. modality_spread — diferença entre score por formato. Spread >2.0
+         pontos sem explicação de tempo (ex: daily vs blitz) é incomum.
+      3. time_uniformity — variância baixa no tempo gasto sugere padrão
+         mecânico. Coeficiente de variação <0.4 em rapid é suspeito.
+      4. phase_consistency — Score muito uniforme entre as 3 fases
+         (max-min < 0.5) é raro — humanos têm assinatura por fase.
+
+    Retorna {"available": bool, "signals": [{name, level, value, note}], "overall_level": ...}.
+    """
+    signals = []
+
+    perf_ratio = (score_calibration or {}).get("performance_ratio")
+    if perf_ratio is not None:
+        if perf_ratio < 0.4:
+            level = "red"; note = "ACPL muito abaixo do esperado para o rating — padrão atípico para humanos não mestres."
+        elif perf_ratio < 0.6:
+            level = "yellow"; note = "ACPL substancialmente abaixo do esperado para o rating; cruze com outros sinais antes de concluir."
+        elif perf_ratio < 0.85:
+            level = "yellow"; note = "Performance acima do esperado para o rating, mas dentro de variação humana plausível."
+        elif perf_ratio < 1.6:
+            level = "green"; note = "Performance compatível com o rating — sem sinal aqui."
+        else:
+            level = "green"; note = "ACPL acima do esperado (joga abaixo do rating mostrado) — não é sinal de assistência."
+        signals.append({
+            "name": "Performance vs rating esperado",
+            "level": level,
+            "value": perf_ratio,
+            "note": note,
+        })
+
+    if modality_scores and len(modality_scores) >= 2 and modality_spread is not None:
+        scores = sorted(modality_scores.values())
+        gap = max(scores) - min(scores)
+        # Se daily está no mix com diferença grande vs rapid/blitz, é esperado
+        # (motor permite cálculo longo) — mas não devemos sinalizar daily como
+        # cheat per se. Sinalizamos apenas quando o gap entre os formatos
+        # rápidos (rapid+blitz+bullet) for grande, OU quando daily está MUITO
+        # acima do resto (>2.5 pontos).
+        non_daily = {k: v for k, v in modality_scores.items() if k != "daily"}
+        gap_non_daily = (max(non_daily.values()) - min(non_daily.values())) if len(non_daily) >= 2 else 0.0
+        daily_score = modality_scores.get("daily")
+        non_daily_avg = (sum(non_daily.values()) / len(non_daily)) if non_daily else None
+        if daily_score is not None and non_daily_avg is not None and (daily_score - non_daily_avg) > 2.5:
+            level = "yellow"
+            note = f"Score em daily ({daily_score:.1f}) supera a média dos formatos rápidos ({non_daily_avg:.1f}) em {daily_score - non_daily_avg:.1f} pontos — gap esperável (cálculo lento) mas digno de nota."
+        elif gap_non_daily > 2.0:
+            level = "yellow"
+            note = f"Gap de {gap_non_daily:.1f} pontos entre formatos rápidos — heterogeneidade alta."
+        else:
+            level = "green"
+            note = f"Spread entre formatos ({gap:.1f}) está dentro do esperado para variação humana."
+        signals.append({
+            "name": "Consistência entre formatos",
+            "level": level,
+            "value": round(gap, 2),
+            "note": note,
+        })
+
+    # Time uniformity — variância baixa no tempo por lance sugere padrão mecânico.
+    # Calcula coeficiente de variação (CV = std/mean) sobre buckets de tempo.
+    buckets = (time_analysis or {}).get("time_buckets") or []
+    if (time_analysis or {}).get("available") and buckets:
+        # Usa a distribuição de shares (concentração em 1 bucket = mecânico).
+        shares = [b.get("share_pct", 0) / 100 for b in buckets if b.get("n", 0) > 0]
+        if len(shares) >= 3:
+            mean_share = sum(shares) / len(shares)
+            var = sum((s - mean_share) ** 2 for s in shares) / len(shares)
+            std = var ** 0.5
+            cv = std / mean_share if mean_share > 0 else 0
+            # CV alto = bem distribuído (humano). CV baixo nessa métrica não
+            # acontece naturalmente — humanos têm picos por fase.
+            # Mas CV ALTO + bucket único dominante (>70%) também é mecânico
+            # (tudo em 2-3s, estilo premove constante).
+            top_share = max(shares)
+            if top_share > 0.70 and cv > 1.0:
+                level = "yellow"
+                note = f"Distribuição de tempo concentrada ({int(top_share*100)}% num único bucket) — pode indicar estilo premove ou execução mecânica."
+            elif top_share > 0.85:
+                level = "red"
+                note = f"Distribuição de tempo extremamente concentrada ({int(top_share*100)}%) — atípico para decisão humana."
+            else:
+                level = "green"
+                note = f"Distribuição de tempo entre buckets é diversa (cv={cv:.2f}) — padrão humano."
+            signals.append({
+                "name": "Distribuição de tempo por lance",
+                "level": level,
+                "value": round(top_share, 2),
+                "note": note,
+            })
+
+    # Phase consistency — humanos variam Score entre fases (abertura > final
+    # ou meio-jogo < final etc). Score quase idêntico nas 3 fases é incomum.
+    phase_scores = [
+        (by_phase.get(ph) or {}).get("score_10")
+        for ph in ("abertura", "meio-jogo", "final")
+    ]
+    phase_scores = [s for s in phase_scores if s is not None]
+    if len(phase_scores) == 3:
+        phase_gap = max(phase_scores) - min(phase_scores)
+        if phase_gap < 0.4:
+            level = "yellow"
+            note = f"Score quase idêntico nas 3 fases (gap {phase_gap:.1f}) — humanos costumam ter assinatura distinta por fase."
+        elif phase_gap > 3.0:
+            level = "green"
+            note = f"Gap entre fases ({phase_gap:.1f}) é amplo — perfil humano típico (uma fase clara mais fraca)."
+        else:
+            level = "green"
+            note = f"Variação por fase ({phase_gap:.1f}) é compatível com perfil humano."
+        signals.append({
+            "name": "Variação por fase do jogo",
+            "level": level,
+            "value": round(phase_gap, 2),
+            "note": note,
+        })
+
+    # Overall: se algum sinal é "red", overall=red; se ≥2 são yellow, overall=yellow; senão green.
+    levels = [s["level"] for s in signals]
+    if "red" in levels:
+        overall = "red"
+    elif levels.count("yellow") >= 2:
+        overall = "yellow"
+    else:
+        overall = "green"
+
+    return {
+        "available": bool(signals),
+        "signals": signals,
+        "overall_level": overall,
+        "disclaimer": "Sinais indiretos — descrevem padrões observados que destoam do esperado. NÃO constituem prova de uso de assistência. Cruze com múltiplos sinais e contexto antes de qualquer conclusão.",
+    }
+
+
 def compute_time_analysis(user_moves, games_lookup) -> dict:
     """Métricas de gestão de tempo (relógio) do usuário.
 
@@ -1487,6 +1631,16 @@ def main():
 
     time_analysis = compute_time_analysis(user_moves, games_lookup)
 
+    # Sinais de uso de assistência (anti-cheat indireto). Não acusa; descreve
+    # padrões observados que destoam do que se espera para o rating do jogador.
+    cheat_signals = compute_cheat_signals(
+        score_calibration=score_calibration,
+        modality_scores=modality_scores,
+        modality_spread=score_modality_spread,
+        time_analysis=time_analysis,
+        by_phase=by_phase,
+    )
+
     puzzle_program = derive_puzzle_program(
         games_df=games_df,
         by_phase=by_phase,
@@ -1577,6 +1731,7 @@ def main():
         },
         "time_analysis": time_analysis,
         "puzzle_program": puzzle_program,
+        "cheat_signals": cheat_signals,
         "score_calibration": score_calibration,
         "head_to_head": head_to_head,
         "paradigmatic_games": paradigmatic,

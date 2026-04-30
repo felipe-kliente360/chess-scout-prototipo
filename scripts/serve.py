@@ -40,6 +40,7 @@ from history import (  # type: ignore
     upsert_games_batch, existing_game_ids, save_analysis_batch,
     fetch_analyses_for_user, games_needing_analysis,
     start_execution_log, end_execution_log, execution_calibration,
+    enqueue_games_for_analysis, queue_progress,
 )
 
 DB_PATH = ROOT / "data" / "db" / "history.db"
@@ -171,6 +172,10 @@ class Handler(BaseHTTPRequestHandler):
                 eng = (qs.get("engine", [""])[0] or "").strip() or None
                 return _json(self, execution_calibration(conn, engine=eng))
 
+            if path == "/api/analyze/progress":
+                u = (qs.get("username", [""])[0] or "").strip() or None
+                return _json(self, queue_progress(conn, username=u))
+
             return _bad(self, f"endpoint não encontrado: {path}", status=404)
         finally:
             conn.close()
@@ -203,6 +208,14 @@ class Handler(BaseHTTPRequestHandler):
                     return _bad(self, "id obrigatório")
                 ok = end_execution_log(conn, int(exec_id), payload)
                 return _json(self, {"ok": ok})
+
+            if path == "/api/analyze/queue":
+                username = (payload.get("username") or "").strip()
+                game_ids = payload.get("game_ids") or []
+                target_depth = int(payload.get("target_depth") or 18)
+                if not username or not game_ids:
+                    return _bad(self, "username e game_ids obrigatórios")
+                return _json(self, enqueue_games_for_analysis(conn, username, game_ids, target_depth))
 
             return _bad(self, f"endpoint não encontrado: {path}", status=404)
         finally:
