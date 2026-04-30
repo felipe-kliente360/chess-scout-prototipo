@@ -74,6 +74,34 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 - `signature_delta_flags` compara assinatura cacheada vs atual e devolve flag por seção (`reuse` | `regenerate`) com heurísticas: n_games delta >20% regenera tudo; score delta >0.5 regenera 1/2/6/9/11; fase delta >0.3 regenera 2/6; top_openings/tactical_top1/paradigmaticas mudaram regeneram a respectiva seção.
 - CLI `cache_lookup.py <user> <perspective>` retorna `{cached, sections, delta_flags, reuse_recommendation}`. Skills `report-myself`/`report-enemy`/`report-coach` consultam antes de redigir; em `partial_regen` regeneram só seções com flag, copiam o resto. Economia ~10× em tokens quando muda pouco.
 
+### Backend Stockfish nativo + fila
+
+- Tabela `analysis_queue (id, username, game_id, target_depth, status, ...)` com índices em status+enqueued_at e username+status.
+- Worker em `scripts/analyze_worker.py` — `chess.engine.SimpleEngine.popen_uci(stockfish)`, `Hash=256`, `Threads=1`, multiprocessing N workers em paralelo. Modo `--once` para esvaziar fila e sair, ou loop infinito padrão.
+- Endpoint `POST /api/analyze/queue` (browser enfileira) + `GET /api/analyze/progress` (polling de progresso). Helpers `enqueue_games_for_analysis` / `claim_next_pending` (atomic UPDATE + RETURNING) / `mark_job_done` / `queue_progress` em `history.py`.
+- UI: botão "⚡ Enfileirar no backend (Stockfish nativo)" lê pendentes via `/api/analyses/needed`, posta lista, faz polling a cada 3s até zerar pending+running.
+- Smoke validado end-to-end: 1 partida com depth 20 (45 lances) processada pelo worker em <1 minuto.
+
+### Redactor automático com prompt caching
+
+- `redactor_prompt.md` (~6k chars) + `theory.md` (~49k chars) + `SKILL.md` da perspectiva (~11k chars) entram em 3 blocos `cache_control: ephemeral` no system prompt da API Anthropic. Total cacheável ~16k tokens; variável (computed.json) ~3k tokens.
+- `redactor.py <username> <perspective> [--model claude-opus-4-7]` — devolve sections.json em `data/`. Logs cache_read/cache_create por chamada.
+- Flag `--auto-redact` em `build.py`: gera sections.json e segue para construção de PDF sem precisar de Claude na conversa.
+- Pré-requisito: `ANTHROPIC_API_KEY` no env. Custo unitário esperado: ~R$ 0,54 com cache hit (vs R$ 1,08 sem otim).
+
+### Anti-cheat indireto via outliers de Score
+
+- `compute_cheat_signals` em `compute.py` — 4 sinais: performance vs rating esperado (ratio acpl_d20/expected), consistência entre formatos, distribuição de tempo por bucket, variação por fase.
+- Cada sinal vira semáforo `green` | `yellow` | `red` com nota explicativa. Overall = pior dos 4 (ou yellow se ≥2 yellows).
+- Macro `cheat_signals_block` em `macros.html` renderiza tabela colorida com disclaimer ("não constitui prova"). Seção opcional 13 nos templates myself e enemy — só renderiza se `available=true`.
+- Tom factual por default; redator pode escrever 1 parágrafo opcional em `section_cheat_signals` quando overall != green.
+
+### Separar coleta vs análise (estado persistente do DB)
+
+- Painel "DB state" embaixo da estimativa: ao trocar username/depth, mostra "X partidas no DB · Y precisam análise em depth Z".
+- Botão "⚙ Analisar pendentes (sem refetch)" que carrega games existentes via `/api/games`, filtra pelos formatos selecionados e dispara `analyzeGames()` reusando todo cache do DB.
+- `renderPreview` extraído como função reutilizável; `refreshDbState` chamado após fetch / analyze / reset.
+
 ### Coleta — toggle de cota + detecção de tendência
 
 - **Modo de cota** (`QUOTA_MODE`): radio "por estilo" (atual: TARGET × N formatos) vs "total (recência)" (TARGET partidas mais recentes do conjunto). Resolve fricção de quem joga 80% rapid e antes era forçado a buscar bullet só pra cumprir cota.
@@ -102,19 +130,6 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 
 ## 🔜 Próximas iterações (em ordem de retorno comercial)
 
-### 1. Backend de análise (Stockfish nativo + fila)
-**Por quê:** browser-only não escala. Stockfish.js a depth 18 leva horas para 200 partidas; usuário precisa manter aba aberta.
-**Como:** Worker Python com `python-chess` + Stockfish nativo, fila Redis ou SQLite-based, endpoint `POST /analyze` que recebe lista de PGNs e devolve direto no DB.
-**Impacto:** Destrava produto B2C. Permite análise paralela (4–8 workers), depth 22+, e usuário fecha o app enquanto roda.
-**Custo:** 2 dias.
-
-### 2. Meta-prompt versionado para redação automática
-**Por quê:** hoje cada `_sections.json` é escrito na mão. Não escala para 100 relatórios/mês.
-**Como:** Prompt template em `_chess_shared/redactor_prompt.md` com placeholders para o JSON computado. Chamada via API Anthropic com **prompt caching** (parte estática do prompt cacheia; só o JSON varia). Skill `redactor` invocada por `build.py`.
-**Impacto:** Geração end-to-end automática (compute → redação → PDF). Custo por relatório cai pra ~$0.02–0.05.
-**Custo:** 1 dia.
-**Pré-requisito:** definir voz/tom canônica em forma de exemplos (few-shot).
-
 ### 5. Comparativo cross-jogador
 **Por quê:** o SQLite `players` table existe mas não é usado. Querível: "como o `jhoumedeiros` se compara aos outros usuários da minha base?".
 **Como:** Nova seção opcional no relatório (myself only): tabela com percentil de score / win-rate / depth de teoria entre os players da DB.
@@ -124,16 +139,6 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 **Por quê:** muitos jogadores sérios usam Lichess. API é aberta e tem PGN+análise embutida.
 **Como:** Adicionar dropdown de "fonte" no `index.html`; novo parser `parseLichessGames`; resto do pipeline reaproveita.
 **Custo:** 4h.
-
-### 7. Refactor: separar coleta vs análise no `index.html`
-**Por quê:** hoje `index.html` faz coleta + análise. Em coletas grandes o usuário quer rodar a análise depois (ou em outra máquina).
-**Como:** Botões separados "Buscar Partidas" → grava `games`, depois "Analisar Stockfish" → consome a tabela. Já parcialmente preparado pelo modo SQLite.
-**Custo:** 3h.
-
-### 8. Anti-cheat indireto via score outliers
-**Por quê:** o `engine_suspicion_factor` já desconta Score quando ACPL é implausível. Hoje só aplica multiplicativamente; falta seção dedicada.
-**Como:** Seção opcional "Sinais de uso de assistência" no relatório (com cuidado linguístico — não acusar, descrever padrão observado: spread por modalidade, ratio acpl/expected por formato).
-**Custo:** 4h. Sensibilidade política — pensar antes.
 
 ### 9. PWA + IndexedDB (cache no browser sem backend)
 **Por quê:** se o browser cachear sozinho, dispensa o servidor local pra usuários casuais.

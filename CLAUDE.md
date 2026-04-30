@@ -196,6 +196,10 @@ Quando produto mudar, **atualizar essas docs no mesmo commit** que a mudança de
 | Skill `report-coach` (3ª perspectiva, B2B)                                    | 2026-04-29 | Voz treinador→aluno; benchmark cross-aluno via `compute_coach_benchmarks` |
 | Cache de sections com signature delta                                         | 2026-04-29 | Tabela `sections_cache`; skill consulta via `cache_lookup.py` antes de redigir |
 | Telemetria de execução com auto-recalibração                                  | 2026-04-29 | Tabela `execution_logs`; `estimateSecondsPerPosition` usa mediana observada por (engine, depth) |
+| Backend Stockfish nativo + fila SQLite                                        | 2026-04-29 | `analyze_worker.py` + `analysis_queue` + endpoints `/api/analyze/{queue,progress}` |
+| Redactor automático com prompt caching (~16k tokens cacheados)                | 2026-04-29 | `redactor.py` + `redactor_prompt.md` + flag `--auto-redact` em build.py |
+| Anti-cheat via outliers — 4 sinais com semáforo green/yellow/red              | 2026-04-29 | `compute_cheat_signals` em compute.py + macro `cheat_signals_block` |
+| Estado persistente do DB no boot + botão "Analisar pendentes sem refetch"     | 2026-04-29 | `refreshDbState` + `analyzePending` em index.html |
 
 ### Em aberto (decidir num próximo ciclo)
 
@@ -233,6 +237,14 @@ python3.12 .claude/skills/_chess_shared/build.py <user> enemy
 ```bash
 # Cache de sections (regen rápida + economia de tokens)
 /opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/cache_lookup.py <user> <myself|enemy|coach>
+
+# Backend Stockfish nativo (rode em outro terminal)
+/opt/homebrew/bin/python3.12 scripts/analyze_worker.py --workers 4 --depth 18
+
+# Redactor automático (requer ANTHROPIC_API_KEY)
+/opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/redactor.py <user> <perspective>
+# ou direto no build:
+/opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/build.py <user> <perspective> --auto-redact
 ```
 
 ---
@@ -287,4 +299,4 @@ Quando algo não está claro ou destoa de uma decisão prévia, eu pergunto ante
 - Quando um padrão técnico da seção 3 mudar.
 - Quando emergir uma lição da seção 7 que valha registrar.
 
-Última atualização: 2026-04-29 — pós report-coach + cache de sections + telemetria de execução.
+Última atualização: 2026-04-29 — pós backend Stockfish nativo + redactor automático + anti-cheat + estado persistente do DB.
