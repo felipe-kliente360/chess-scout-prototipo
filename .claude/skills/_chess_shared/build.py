@@ -185,11 +185,30 @@ def compute_coach_benchmarks(conn, username, computed):
 
 def main():
     if len(sys.argv) < 3:
-        raise SystemExit("Uso: python build.py <username> <myself|enemy|coach>")
+        raise SystemExit("Uso: python build.py <username> <myself|enemy|coach> [--auto-redact]")
     username = sys.argv[1].strip()
     perspective = sys.argv[2].strip().lower()
+    auto_redact = "--auto-redact" in sys.argv[3:]
     if perspective not in VALID_PERSPECTIVES:
         raise SystemExit(f"❌ perspective inválida ({perspective}); use: {sorted(VALID_PERSPECTIVES)}")
+
+    # Auto-redact: chama redactor.py (API Anthropic com prompt caching) para
+    # gerar sections.json automaticamente antes do build. Pré-requisito:
+    # ANTHROPIC_API_KEY no env.
+    if auto_redact:
+        try:
+            sys.path.insert(0, str(SHARED_DIR))
+            from redactor import call_redactor, find_latest_computed
+            cp = find_latest_computed(username)
+            computed_data = json.loads(cp.read_text(encoding="utf-8"))
+            sections_data = call_redactor(perspective, computed_data, model="claude-opus-4-7")
+            stamp_match = re.search(r"(\d{8}T\d{6}|\d{4}-\d{2}-\d{2})", cp.name)
+            stamp_for_sections = stamp_match.group(1) if stamp_match else "auto"
+            out_sections = DATA_DIR / f"{username}_{stamp_for_sections}_{perspective}_sections.json"
+            out_sections.write_text(json.dumps(sections_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"   sections.json gerado em {out_sections.name}")
+        except Exception as e:
+            print(f"⚠ auto-redact falhou ({e}); tentando seguir com sections.json existente.")
 
     skill_dir = SKILLS_DIR / f"report-{perspective}"
     template_path = skill_dir / "template.html"
