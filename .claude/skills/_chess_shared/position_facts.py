@@ -628,6 +628,78 @@ def detect_castling_state(board):
     return out
 
 
+# ── Novos detectores táticos ──────────────────────────────────────────
+
+def detect_overloaded_pieces(board: chess.Board) -> list[dict]:
+    """Peça adversária (do ponto de vista de quem está a jogar) que defende
+    simultaneamente 2+ peças valiosas (valor >= cavalo), ambas atacadas.
+    Clássico motivo de sobrecarga — base para deflection e capturing-defender."""
+    us = board.turn
+    them = not us
+    out = []
+
+    for sq in chess.SQUARES:
+        piece = board.piece_at(sq)
+        if not piece or piece.color != them:
+            continue
+        # Peças aliadas que este defensor cobre (está nos seus attackers)
+        defended = [
+            s for s in chess.SQUARES
+            if board.piece_at(s) and board.piece_at(s).color == them
+            and s != sq
+            and sq in board.attackers(them, s)
+        ]
+        # Das defendidas, quais estão sob ataque nosso E têm valor >= cavalo?
+        threatened = [
+            s for s in defended
+            if board.is_attacked_by(us, s)
+            and PIECE_VALUE.get(board.piece_at(s).piece_type, 0) >= 3
+        ]
+        if len(threatened) >= 2:
+            out.append({
+                "kind":      "overloaded_piece",
+                "color":     COLOR_NAME[them],
+                "piece":     SYM[piece.piece_type],
+                "square":    chess.square_name(sq),
+                "defending": [chess.square_name(s) for s in threatened],
+            })
+    return out
+
+
+def detect_exposed_king(board: chess.Board) -> list[dict]:
+    """Rei sem escudo de peões E coluna do rei aberta ou semi-aberta.
+    Só detecta no meio-jogo (n_pieces > 10) para evitar falsos em finais."""
+    n_pieces = chess.popcount(board.occupied)
+    if n_pieces <= 10:
+        return []
+    fw, fb = _files_of_pawns(board)
+    out = []
+    for color in (chess.WHITE, chess.BLACK):
+        ksq = board.king(color)
+        if ksq is None:
+            continue
+        kf = chess.square_file(ksq)
+        kr = chess.square_rank(ksq)
+        own_files = fw if color == chess.WHITE else fb
+        # Peões do próprio lado na coluna do rei e vizinhas
+        shield = sum(own_files[f] for f in range(max(0, kf - 1), min(8, kf + 2)))
+        if shield > 0:
+            continue  # há pelo menos um peão de escudo
+        # Coluna do rei: aberta (sem peões de nenhum lado)?
+        enemy_files = fb if color == chess.WHITE else fw
+        col_open = own_files[kf] == 0 and enemy_files[kf] == 0
+        if not col_open:
+            continue
+        out.append({
+            "kind":        "exposed_king",
+            "color":       COLOR_NAME[color],
+            "square":      chess.square_name(ksq),
+            "shield_pawns": shield,
+            "file_open":   True,
+        })
+    return out
+
+
 # ── Registro central ───────────────────────────────────────────────────
 
 ALL_DETECTORS = [
@@ -655,6 +727,8 @@ ALL_DETECTORS = [
     detect_opposite_color_bishops,
     detect_piece_mobility_extremes,
     detect_static_trapped_piece,
+    detect_overloaded_pieces,
+    detect_exposed_king,
     # caráter
     detect_center_type,
     detect_position_phase,

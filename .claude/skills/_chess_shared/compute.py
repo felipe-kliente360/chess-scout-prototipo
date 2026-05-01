@@ -799,6 +799,253 @@ def load_from_db(username: str) -> tuple[pd.DataFrame, pd.DataFrame, int | None,
     return games_df, an_df, depth_min, stamp
 
 
+# ── Classificação de papel tático (A/B/C) ─────────────────────────────────
+
+# Pesos de papel: A=oportunidade perdida, B=erro punido, C=erro não punido
+_ROLE_WEIGHTS: dict[str, float] = {"A": 2.0, "B": 1.0, "C": 0.5}
+
+# Pesos por modalidade: rapid e blitz pesam; bullet e daily ignorados
+_TC_WEIGHTS: dict[str, float] = {"rapid": 2.0, "blitz": 1.0, "bullet": 0.0, "daily": 0.0}
+
+# Fatos puramente descritivos — excluídos de correlações táticas
+_PURE_DESCRIPTIVE = {"center_type", "position_phase", "castled", "opposite_side_castles",
+                     "opposite_color_bishops"}
+
+
+def _find_causal_tactic(
+    rows: list[dict],
+    start_idx: int,
+    player_color: str,
+    error_threshold: float = 100.0,
+    forced_threshold: float = 150.0,
+    window_size: int = 6,
+) -> dict | None:
+    """Busca o tema tático que o adversário pode explorar (B/C) após o erro
+    do jogador em start_idx. Varre plies à frente até window_size,
+    seguindo a sequência enquanto os lances intermediários do jogador são
+    razoavelmente forçados (loss_cp < forced_threshold).
+
+    Retorna dict {role, theme, confidence, ply, distance} ou None.
+    """
+    n = len(rows)
+    for lookahead in range(1, window_size + 1):
+        idx = start_idx + lookahead
+        if idx >= n:
+            break
+        row = rows[idx]
+        is_player = (row.get("side_to_move") == player_color)
+
+        if not is_player:
+            # Lance do adversário — tema disponível?
+            theme = str(row.get("tactical_theme") or "").strip()
+            conf = float(row.get("tactical_confidence") or 0)
+            if theme and conf >= 0.30:
+                loss_opp = float(row.get("loss_cp") or 0)
+                role = "B" if loss_opp < error_threshold else "C"
+                return {
+                    "role":       role,
+                    "theme":      theme,
+                    "confidence": conf,
+                    "ply":        row.get("ply"),
+                    "distance":   lookahead,
+                }
+        else:
+            # Lance intermediário do jogador — continua se não é novo erro grave
+            player_loss = float(row.get("loss_cp") or 0)
+            if player_loss >= forced_threshold:
+                break  # novo erro; encerra atribuição ao erro original
+    return None
+
+
+def classify_tactical_roles(
+    moves_df: pd.DataFrame,
+    user_color_by_game: dict[int, str],
+) -> pd.DataFrame:
+    """Adiciona coluna 'tactical_role' ('A', 'B', 'C', None) em moves_df.
+
+    A — jogador tinha tema tático disponível (best_move era tático) e não jogou.
+    B — jogador errou, criou tática para o adversário, adversário explorou.
+    C — jogador errou, criou tática para o adversário, adversário não explorou.
+
+    Também adiciona 'tactic_distance' (quantos plies do erro até o tema B/C).
+    """
+    moves_df = moves_df.copy()
+    moves_df["tactical_role"] = None
+    moves_df["tactic_distance"] = None
+
+    for game_idx, group in moves_df.groupby("game_index"):
+        group = group.sort_values("ply").reset_index(drop=True)
+        player_color = user_color_by_game.get(int(game_idx), "")
+        rows = group.to_dict("records")
+
+        for i, row in enumerate(rows):
+            theme = str(row.get("tactical_theme") or "").strip()
+            conf = float(row.get("tactical_confidence") or 0)
+            if not theme or conf < 0.30:
+                continue
+
+            is_player = (row.get("side_to_move") == player_color)
+            loss = float(row.get("loss_cp") or 0)
+
+            orig_idx = group.index[i]
+
+            if is_player and loss >= 50:
+                # Tipo A: jogador tinha tema no best_move, jogou outra coisa
+                moves_df.at[orig_idx, "tactical_role"] = "A"
+                moves_df.at[orig_idx, "tactic_distance"] = 0
+
+            elif not is_player and i > 0:
+                # Lance do adversário com tema — busca se veio de erro do jogador
+                prev = rows[i - 1]
+                prev_loss = float(prev.get("loss_cp") or 0)
+                if prev_loss >= 100:
+                    # Erro imediato do jogador → B/C direto
+                    role = "B" if loss < 100 else "C"
+                    prev_orig = group.index[i - 1]
+                    if moves_df.at[prev_orig, "tactical_role"] is None:
+                        moves_df.at[prev_orig, "tactical_role"] = role
+                        moves_df.at[prev_orig, "tactic_distance"] = 1
+
+            elif is_player and loss >= 100:
+                # Erro do jogador — busca tema causal em lances futuros do adversário
+                result = _find_causal_tactic(rows, i, player_color)
+                if result:
+                    orig_idx = group.index[i]
+                    if moves_df.at[orig_idx, "tactical_role"] is None:
+                        moves_df.at[orig_idx, "tactical_role"] = result["role"]
+                        moves_df.at[orig_idx, "tactic_distance"] = result["distance"]
+
+    return moves_df
+
+
+def aggregate_tactical_weighted(
+    moves_df: pd.DataFrame,
+    game_tc_map: dict[int, str],
+) -> tuple[list[dict], dict, dict, list[dict]]:
+    """Agrega temas táticos com pesos por papel (A/B/C) e modalidade (rapid/blitz).
+
+    Retorna (weighted_top5, role_totals, by_time_class, timeline_rows).
+    timeline_rows = lista de dicts prontos para emit_tactical_timeline.
+    """
+    from collections import defaultdict
+
+    weighted: dict[str, float] = defaultdict(float)
+    breakdown: dict[str, dict[str, float]] = defaultdict(lambda: {"A": 0.0, "B": 0.0, "C": 0.0})
+    by_tc: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    role_totals: dict[str, float] = {"A": 0.0, "B": 0.0, "C": 0.0}
+
+    # Para timeline longitudinal: (period, time_class, theme, role) → (weighted, raw)
+    timeline: dict[tuple, list] = defaultdict(lambda: [0.0, 0])
+
+    flagged = moves_df[
+        (moves_df.get("tactical_role") is not None
+         if "tactical_role" not in moves_df.columns
+         else moves_df["tactical_role"].notna())
+        & (moves_df["tactical_theme"].fillna("") != "")
+        & (moves_df["loss_cp"] >= 50)
+    ].copy() if "tactical_role" in moves_df.columns else pd.DataFrame()
+
+    if not len(flagged):
+        return [], role_totals, {}, []
+
+    for _, row in flagged.iterrows():
+        theme = str(row.get("tactical_theme") or "").strip()
+        role = str(row.get("tactical_role") or "B")
+        tc = game_tc_map.get(int(row.get("game_index", 0)), "blitz")
+
+        tc_w = _TC_WEIGHTS.get(tc, 0.0)
+        if tc_w == 0.0:
+            continue  # bullet/daily ignorados
+
+        role_w = _ROLE_WEIGHTS.get(role, 1.0)
+        # Decaimento causal por distância (1 = direto; >1 = sequência forçada)
+        dist = row.get("tactic_distance")
+        dist_factor = 1.0 / (1 + 0.2 * ((int(dist) - 1) if dist and int(dist) > 1 else 0))
+        w = role_w * tc_w * dist_factor
+
+        weighted[theme] += w
+        breakdown[theme][role] += w
+        by_tc[tc][theme] += w
+        role_totals[role] = role_totals.get(role, 0.0) + w
+
+        # Período do lance (YYYY-MM da data da partida)
+        date_str = str(row.get("date") or "")
+        period = date_str[:7] if len(date_str) >= 7 else "unknown"
+        key = (period, tc, theme, role)
+        timeline[key][0] += w
+        timeline[key][1] += 1
+
+    top5 = sorted(weighted.items(), key=lambda x: -x[1])[:5]
+    weighted_top = [
+        {
+            "theme":     t,
+            "score":     round(s, 2),
+            "breakdown": {k: round(v, 2) for k, v in breakdown[t].items()},
+        }
+        for t, s in top5
+    ]
+
+    by_tc_out = {
+        tc: sorted(themes.items(), key=lambda x: -x[1])[:3]
+        for tc, themes in by_tc.items()
+    }
+
+    timeline_rows = [
+        {
+            "period":       k[0],
+            "time_class":   k[1],
+            "theme":        k[2],
+            "role":         k[3],
+            "weighted_sum": round(v[0], 4),
+            "raw_count":    v[1],
+        }
+        for k, v in timeline.items()
+    ]
+
+    return weighted_top, role_totals, by_tc_out, timeline_rows
+
+
+def correlate_theme_facts(moves_df: pd.DataFrame) -> dict[str, list[dict]]:
+    """Para cada tema+papel, quais position_facts ocorrem mais frequentemente?
+    Retorna {\"fork:A\": [{\"fact\": \"isolated_pawn:w\", \"n\": 5}, ...], ...}"""
+    from collections import defaultdict
+
+    theme_fact_counter: dict[str, Counter] = defaultdict(Counter)
+
+    flagged = moves_df[
+        moves_df.get("tactical_role", pd.Series()).notna()
+        & (moves_df["tactical_theme"].fillna("") != "")
+        & (moves_df["loss_cp"] >= 50)
+    ] if "tactical_role" in moves_df.columns else pd.DataFrame()
+
+    for _, row in flagged.iterrows():
+        theme = str(row.get("tactical_theme") or "").strip()
+        role = str(row.get("tactical_role") or "")
+        if not theme or not role:
+            continue
+        facts_raw = row.get("position_facts")
+        if not facts_raw:
+            continue
+        try:
+            facts = json.loads(facts_raw) if isinstance(facts_raw, str) else facts_raw
+        except Exception:
+            continue
+        key = f"{theme}:{role}"
+        for fact in (facts or []):
+            kind = fact.get("kind", "")
+            if kind in _PURE_DESCRIPTIVE:
+                continue
+            color = fact.get("color", "")
+            fkey = f"{kind}:{color}" if color else kind
+            theme_fact_counter[key][fkey] += 1
+
+    return {
+        k: [{"fact": f, "n": n} for f, n in cnt.most_common(3)]
+        for k, cnt in theme_fact_counter.items()
+        if cnt
+    }
+
+
 def main():
     if len(sys.argv) < 2:
         raise SystemExit("Uso: python compute.py <username>")
@@ -912,6 +1159,9 @@ def main():
     moves_df["is_user_move"] = moves_df.apply(
         lambda r: user_color_by_game.get(r["game_index"]) == r["side_to_move"], axis=1
     )
+
+    # ── Classificação de papel tático A/B/C em todos os plies ────────────
+    moves_df = classify_tactical_roles(moves_df, user_color_by_game)
 
     user_moves_all = moves_df[moves_df["is_user_move"]]
 
@@ -1052,29 +1302,42 @@ def main():
     # ── Agregados de fatos estruturais (position_facts) ──────────────
     # Roda detect_position_facts no FEN do worst_move de cada partida e
     # agrega: top fatos absolutos + correlação com resultado (W/L/D).
-    # Filtra fatos descritivos puros (center_type, position_phase, castled)
-    # que não trazem diagnóstico isolado.
-    _PURE_DESCRIPTIVE = {"center_type", "position_phase", "castled", "opposite_side_castles"}
     facts_counter = Counter()
     facts_corr: dict[str, dict[str, int]] = {}
-    # game_metrics será populado abaixo. Vamos popular depois numa segunda passada.
-    # Conta temas só em lances do usuário com erro (loss_cp >= 50) — temas em
-    # lances quietos do solver poluem o ranking. Confidence mínima 0.30 para
-    # evitar fingerprints com classificação ambígua.
-    tactical_top = []
-    tactical_by_phase = {"abertura": [], "meio-jogo": [], "final": []}
+
+    # ── Agregação tática ponderada (A/B/C × rapid/blitz) ──────────────────
+    # Mapa game_index → time_class para pesos de modalidade
+    game_tc_map = {
+        int(row["index"]): str(row.get("time_class") or "")
+        for _, row in games_df.iterrows()
+    }
+    # user_moves já tem tactical_role (de classify_tactical_roles); adiciona date
+    date_by_game = {int(row["index"]): str(row.get("date") or "") for _, row in games_df.iterrows()}
+    user_moves = user_moves.copy()
+    user_moves["date"] = user_moves["game_index"].map(date_by_game)
+    user_moves["time_class_tc"] = user_moves["game_index"].map(game_tc_map)
+
+    tactical_weighted_top, role_totals, tactical_by_tc, _timeline_rows = \
+        aggregate_tactical_weighted(user_moves, game_tc_map)
+    theme_facts_corr = correlate_theme_facts(user_moves)
+
+    # Compatibilidade: mantém tactical_top no formato legado (n = raw count)
+    tactical_top: list[dict] = []
+    tactical_by_phase: dict[str, list] = {"abertura": [], "meio-jogo": [], "final": []}
     if "tactical_theme" in user_moves.columns:
-        flagged = user_moves[(user_moves["loss_cp"] >= 50) & (user_moves["tactical_theme"] != "")]
-        if len(flagged):
+        flagged_legacy = user_moves[
+            (user_moves["loss_cp"] >= 50) & (user_moves["tactical_theme"].fillna("") != "")
+        ]
+        if len(flagged_legacy):
             try:
-                conf_series = pd.to_numeric(flagged["tactical_confidence"], errors="coerce").fillna(0.0)
-                flagged = flagged[conf_series >= 0.30]
+                conf_s = pd.to_numeric(flagged_legacy["tactical_confidence"], errors="coerce").fillna(0.0)
+                flagged_legacy = flagged_legacy[conf_s >= 0.30]
             except Exception:
                 pass
-            theme_counter = Counter(flagged["tactical_theme"].tolist())
+            theme_counter = Counter(flagged_legacy["tactical_theme"].tolist())
             tactical_top = [{"theme": t, "n": n} for t, n in theme_counter.most_common(5)]
             for ph in ["abertura", "meio-jogo", "final"]:
-                sub = flagged[flagged["phase"] == ph]
+                sub = flagged_legacy[flagged_legacy["phase"] == ph]
                 if len(sub):
                     pc = Counter(sub["tactical_theme"].tolist())
                     tactical_by_phase[ph] = [{"theme": t, "n": n} for t, n in pc.most_common(3)]
@@ -1716,6 +1979,13 @@ def main():
             "good_moves": cat_counts.get("good", 0),
             "tactical_themes_top": tactical_top,
             "tactical_themes_by_phase": tactical_by_phase,
+            "tactical_profile": {
+                "weighted_top":    tactical_weighted_top,
+                "role_totals":     {k: round(v, 2) for k, v in role_totals.items()},
+                "by_time_class":   {tc: [{"theme": t, "score": round(s, 2)} for t, s in items]
+                                    for tc, items in tactical_by_tc.items()},
+                "theme_facts_corr": theme_facts_corr,
+            },
             "position_facts_top": position_facts_top,
             "position_facts_correlation": facts_corr,
         },
@@ -1742,11 +2012,16 @@ def main():
     out_path = DATA_DIR / f"{username}_{stamp}_computed.json"
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # Persistência longitudinal (SQLite) + cache de position_facts.
+    # Persistência longitudinal (SQLite) + cache de position_facts + timeline tática.
     try:
-        from history import open_db, record_analysis, update_position_facts_batch
+        from history import (open_db, record_analysis, update_position_facts_batch,
+                             emit_tactical_timeline)
         conn = open_db(DATA_DIR / "db" / "history.db")
         record_analysis(conn, payload, perspective=None)
+        # Timeline tática longitudinal
+        if _timeline_rows:
+            n_tl = emit_tactical_timeline(conn, username, _timeline_rows)
+            print(f"   📈 tactical_timeline: {n_tl} entradas atualizadas")
         # Cache de position_facts: para cada lance flagrado cujo facts foi
         # computado in-flight, grava o JSON na coluna position_facts. Próxima
         # execução de compute lê direto, sem recomputar.

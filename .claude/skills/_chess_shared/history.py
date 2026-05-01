@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS game_analyses (
   tactical_theme TEXT,
   tactical_confidence REAL,
   tactical_source TEXT,
+  tactical_themes TEXT,          -- JSON array top-3: [{"theme":"fork","confidence":0.63}, ...]
+  tactical_role TEXT,            -- 'A' oportunidade perdida | 'B' erro punido | 'C' erro não punido
   position_facts TEXT,           -- JSON list[dict] com fatos estruturais; vazio se loss_cp < 50
   clock_ms INTEGER,              -- relógio remanescente após o lance (do PGN [%clk]); NULL se sem dado
   time_spent_ms INTEGER,         -- tempo gasto naquele lance (já incluindo increment); NULL idem
@@ -108,6 +110,20 @@ CREATE TABLE IF NOT EXISTS game_analyses (
 CREATE INDEX IF NOT EXISTS idx_ga_game ON game_analyses(game_id);
 -- Acelera games_needing_analysis e dedup-map (MIN/MAX(depth) por game_id):
 CREATE INDEX IF NOT EXISTS idx_ga_game_depth ON game_analyses(game_id, depth);
+
+-- ── Timeline tática longitudinal ──────────────────────────────────────────
+-- compute.py emite ao final de cada execução. Permite comparar ciclos sem
+-- reanalisar todas as partidas. period = 'YYYY-MM' da partida (não da análise).
+CREATE TABLE IF NOT EXISTS tactical_timeline (
+  username     TEXT NOT NULL,
+  period       TEXT NOT NULL,
+  time_class   TEXT NOT NULL,
+  theme        TEXT NOT NULL,
+  role         TEXT NOT NULL,
+  weighted_sum REAL NOT NULL DEFAULT 0,
+  raw_count    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (username, period, time_class, theme, role)
+);
 
 -- ── Telemetria de execução ────────────────────────────────────────────────
 -- Browser registra em /api/execution-logs/start ao iniciar uma análise e
@@ -238,6 +254,26 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
     if "time_spent_ms" not in existing_cols:
         conn.execute("ALTER TABLE game_analyses ADD COLUMN time_spent_ms INTEGER")
         conn.commit()
+    if "tactical_themes" not in existing_cols:
+        conn.execute("ALTER TABLE game_analyses ADD COLUMN tactical_themes TEXT")
+        conn.commit()
+    if "tactical_role" not in existing_cols:
+        conn.execute("ALTER TABLE game_analyses ADD COLUMN tactical_role TEXT")
+        conn.commit()
+    # tactical_timeline pode não existir em DBs antigos — garante via CREATE IF NOT EXISTS
+    conn.executescript("""
+      CREATE TABLE IF NOT EXISTS tactical_timeline (
+        username     TEXT NOT NULL,
+        period       TEXT NOT NULL,
+        time_class   TEXT NOT NULL,
+        theme        TEXT NOT NULL,
+        role         TEXT NOT NULL,
+        weighted_sum REAL NOT NULL DEFAULT 0,
+        raw_count    INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (username, period, time_class, theme, role)
+      );
+    """)
+    conn.commit()
     return conn
 
 
@@ -423,7 +459,8 @@ ANALYSIS_COLUMNS = (
     "game_id", "ply", "side_to_move", "move_san", "move_uci",
     "fen_before", "depth", "evaluation", "mate", "best_move",
     "continuation", "tactical_theme", "tactical_confidence",
-    "tactical_source", "position_facts", "analyzed_at",
+    "tactical_source", "tactical_themes", "tactical_role",
+    "position_facts", "analyzed_at",
 )
 
 
@@ -458,6 +495,8 @@ def save_analysis_batch(conn: sqlite3.Connection, rows: list[dict]) -> int:
             tactical_theme = excluded.tactical_theme,
             tactical_confidence = excluded.tactical_confidence,
             tactical_source = excluded.tactical_source,
+            tactical_themes = COALESCE(excluded.tactical_themes, game_analyses.tactical_themes),
+            tactical_role = COALESCE(excluded.tactical_role, game_analyses.tactical_role),
             position_facts = COALESCE(excluded.position_facts, game_analyses.position_facts),
             analyzed_at = excluded.analyzed_at
           WHERE excluded.depth >= game_analyses.depth
@@ -874,6 +913,56 @@ def signature_delta_flags(prev: dict, curr: dict) -> dict:
         out["section_time_management"] = "regenerate"
 
     return out
+
+
+# ── Timeline tática longitudinal ─────────────────────────────────────────
+
+def emit_tactical_timeline(conn: sqlite3.Connection, username: str,
+                           timeline_rows: list[dict]) -> int:
+    """Upsert em tactical_timeline. timeline_rows = lista de dicts com campos:
+    {period, time_class, theme, role, weighted_sum, raw_count}.
+    Acumula sobre execuções anteriores do mesmo mês (soma, não substitui)."""
+    if not timeline_rows:
+        return 0
+    n = 0
+    for r in timeline_rows:
+        conn.execute("""
+          INSERT INTO tactical_timeline
+            (username, period, time_class, theme, role, weighted_sum, raw_count)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(username, period, time_class, theme, role) DO UPDATE SET
+            weighted_sum = weighted_sum + excluded.weighted_sum,
+            raw_count    = raw_count    + excluded.raw_count
+        """, (
+            username,
+            str(r["period"]),
+            str(r["time_class"]),
+            str(r["theme"]),
+            str(r["role"]),
+            float(r.get("weighted_sum") or 0),
+            int(r.get("raw_count") or 0),
+        ))
+        n += 1
+    conn.commit()
+    return n
+
+
+def fetch_tactical_timeline(conn: sqlite3.Connection, username: str,
+                             n_periods: int = 6) -> list[dict]:
+    """Últimos N meses de dados táticos, ordem cronológica."""
+    cur = conn.execute("""
+      SELECT period, time_class, theme, role,
+             SUM(weighted_sum) AS weighted_sum, SUM(raw_count) AS raw_count
+      FROM tactical_timeline
+      WHERE username = ?
+        AND period IN (
+          SELECT DISTINCT period FROM tactical_timeline
+          WHERE username = ? ORDER BY period DESC LIMIT ?
+        )
+      GROUP BY period, time_class, theme, role
+      ORDER BY period ASC, weighted_sum DESC
+    """, (username, username, n_periods))
+    return [dict(r) for r in cur.fetchall()]
 
 
 # ── Fila de análise nativa ────────────────────────────────────────────────

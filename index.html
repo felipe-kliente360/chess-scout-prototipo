@@ -1536,6 +1536,7 @@
             tactical_theme: tactical ? tactical.theme : "",
             tactical_confidence: tactical ? tactical.confidence : "",
             tactical_source: tactical ? tactical.source : "",
+            tactical_themes: tactical ? JSON.stringify(tactical.themes) : "",
           };
           allAnalysis.push(record);
 
@@ -1557,6 +1558,7 @@
               tactical_theme: tactical ? tactical.theme : null,
               tactical_confidence: tactical ? tactical.confidence : null,
               tactical_source: tactical ? tactical.source : null,
+              tactical_themes: tactical ? JSON.stringify(tactical.themes) : null,
             });
             // Safety net: só dispara em partidas anormalmente longas
             if (pendingPostBuffer.length >= POST_SAFETY_NET) {
