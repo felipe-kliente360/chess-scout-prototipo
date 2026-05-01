@@ -279,16 +279,20 @@
   }
 
   // ── API de classificação ────────────────────────────────────────────
-  function lookup(table, fp) {
+
+  // Retorna top-3 temas com confiança >= minConf. null se nenhum match.
+  function lookupMulti(table, fp, minN, minConf) {
     if (!table || !fp) return null;
     const hit = table[fp];
-    if (!hit || !hit.t || !hit.t.length) return null;
-    return {
-      theme: hit.t[0],
-      confidence: Math.round((hit.c[0] / hit.n) * 100) / 100,
-      n: hit.n,
-      alternatives: hit.t.slice(1).join(","),
-    };
+    if (!hit || !hit.t || !hit.t.length || hit.n < minN) return null;
+    const themes = [];
+    for (let i = 0; i < Math.min(hit.t.length, 3); i++) {
+      const conf = Math.round((hit.c[i] / hit.n) * 100) / 100;
+      if (conf < minConf) break;
+      themes.push({ theme: hit.t[i], confidence: conf });
+    }
+    if (!themes.length) return null;
+    return { themes, n: hit.n };
   }
 
   function classifyPosition(fen, bestUci, playedUci) {
@@ -300,16 +304,36 @@
     if (bestUci && bestUci.length >= 4) {
       try {
         const fpC = fingerprintC(chess, bestUci);
-        const hit = lookup(TACTICAL_INDEX.C, fpC);
-        if (hit && hit.n >= 5) return { ...hit, source: "C", fingerprint: fpC };
+        const hit = lookupMulti(TACTICAL_INDEX.C, fpC, 5, 0.30);
+        if (hit) {
+          return {
+            // legado: theme/confidence apontam para top-1
+            theme: hit.themes[0].theme,
+            confidence: hit.themes[0].confidence,
+            n: hit.n,
+            // novo: array completo top-3
+            themes: hit.themes,
+            source: "C",
+            fingerprint: fpC,
+          };
+        }
       } catch (_) { /* fallback B */ }
     }
 
     // B como fallback (ou primário se não há best_move)
     try {
       const fpB = fingerprintB(chess);
-      const hit = lookup(TACTICAL_INDEX.B, fpB);
-      if (hit && hit.n >= 3) return { ...hit, source: "B", fingerprint: fpB };
+      const hit = lookupMulti(TACTICAL_INDEX.B, fpB, 3, 0.30);
+      if (hit) {
+        return {
+          theme: hit.themes[0].theme,
+          confidence: hit.themes[0].confidence,
+          n: hit.n,
+          themes: hit.themes,
+          source: "B",
+          fingerprint: fpB,
+        };
+      }
     } catch (_) {}
     return null;
   }

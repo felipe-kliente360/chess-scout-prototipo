@@ -628,6 +628,145 @@ def detect_castling_state(board):
     return out
 
 
+# ── Novos detectores táticos ──────────────────────────────────────────
+
+def detect_overloaded_pieces(board: chess.Board) -> list[dict]:
+    """Peça adversária (do ponto de vista de quem está a jogar) que defende
+    simultaneamente 2+ peças valiosas (valor >= cavalo), ambas atacadas.
+    Clássico motivo de sobrecarga — base para deflection e capturing-defender."""
+    us = board.turn
+    them = not us
+    out = []
+
+    for sq in chess.SQUARES:
+        piece = board.piece_at(sq)
+        if not piece or piece.color != them:
+            continue
+        # Peças aliadas que este defensor cobre (está nos seus attackers)
+        defended = [
+            s for s in chess.SQUARES
+            if board.piece_at(s) and board.piece_at(s).color == them
+            and s != sq
+            and sq in board.attackers(them, s)
+        ]
+        # Das defendidas, quais estão sob ataque nosso E têm valor >= cavalo?
+        threatened = [
+            s for s in defended
+            if board.is_attacked_by(us, s)
+            and PIECE_VALUE.get(board.piece_at(s).piece_type, 0) >= 3
+        ]
+        if len(threatened) >= 2:
+            out.append({
+                "kind":      "overloaded_piece",
+                "color":     COLOR_NAME[them],
+                "piece":     SYM[piece.piece_type],
+                "square":    chess.square_name(sq),
+                "defending": [chess.square_name(s) for s in threatened],
+            })
+    return out
+
+
+def detect_exposed_king(board: chess.Board) -> list[dict]:
+    """Rei sem escudo de peões E coluna do rei aberta ou semi-aberta.
+    Só detecta no meio-jogo (n_pieces > 10) para evitar falsos em finais."""
+    n_pieces = chess.popcount(board.occupied)
+    if n_pieces <= 10:
+        return []
+    fw, fb = _files_of_pawns(board)
+    out = []
+    for color in (chess.WHITE, chess.BLACK):
+        ksq = board.king(color)
+        if ksq is None:
+            continue
+        kf = chess.square_file(ksq)
+        kr = chess.square_rank(ksq)
+        own_files = fw if color == chess.WHITE else fb
+        # Peões do próprio lado na coluna do rei e vizinhas
+        shield = sum(own_files[f] for f in range(max(0, kf - 1), min(8, kf + 2)))
+        if shield > 0:
+            continue  # há pelo menos um peão de escudo
+        # Coluna do rei: aberta (sem peões de nenhum lado)?
+        enemy_files = fb if color == chess.WHITE else fw
+        col_open = own_files[kf] == 0 and enemy_files[kf] == 0
+        if not col_open:
+            continue
+        out.append({
+            "kind":        "exposed_king",
+            "color":       COLOR_NAME[color],
+            "square":      chess.square_name(ksq),
+            "shield_pawns": shield,
+            "file_open":   True,
+        })
+    return out
+
+
+def detect_pin_family(board: chess.Board) -> list[dict]:
+    """Detecta peças cravadas (pin) com dois subtipos:
+    - pin_prevents_attack: peça cravada ataca alvo valioso mas não pode capturar
+    - pin_prevents_escape: peça cravada de alto valor sem casas seguras na ray do pin
+
+    Só peças de HIGH_VALUE (≥ cavalo) são relatadas para evitar ruído de peões cravados.
+    """
+    HIGH_VALUE = {chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN}
+    out = []
+
+    for color in (chess.WHITE, chess.BLACK):
+        enemy = not color
+        for sq in chess.SquareSet(board.occupied_co[color]):
+            piece = board.piece_at(sq)
+            if piece is None or piece.piece_type not in HIGH_VALUE:
+                continue
+            if not board.is_pinned(color, sq):
+                continue
+
+            pin_ray = board.pin(color, sq)  # SquareSet of squares the piece may move to
+
+            # Subtype A: pin_prevents_attack
+            # Peça cravada ataca pelo menos uma peça inimiga de alto valor,
+            # mas o alvo não está na ray do pin (logo a captura é ilegal).
+            attacks_val_targets = False
+            for target_sq in board.attacks(sq):
+                target = board.piece_at(target_sq)
+                if (target and target.color == enemy
+                        and target.piece_type in HIGH_VALUE
+                        and target_sq not in pin_ray):
+                    attacks_val_targets = True
+                    break
+
+            if attacks_val_targets:
+                out.append({
+                    "kind":     "pin_prevents_attack",
+                    "subtype":  "pin",
+                    "color":    COLOR_NAME[color],
+                    "piece":    SYM[piece.piece_type],
+                    "square":   chess.square_name(sq),
+                })
+                continue  # não duplicar com prevents_escape na mesma peça
+
+            # Subtype B: pin_prevents_escape
+            # Peça de alto valor cravada com zero casas seguras na ray do pin.
+            legal_in_ray = 0
+            for to_sq in pin_ray:
+                if to_sq == sq:
+                    continue
+                target = board.piece_at(to_sq)
+                if target and target.color == color:
+                    continue  # bloqueada por peça própria
+                # simples: se está na ray o lance pode ser legal (checagem fina é cara)
+                legal_in_ray += 1
+
+            if legal_in_ray == 0 and PIECE_VALUE.get(piece.piece_type, 0) >= 3:
+                out.append({
+                    "kind":    "pin_prevents_escape",
+                    "subtype": "pin",
+                    "color":   COLOR_NAME[color],
+                    "piece":   SYM[piece.piece_type],
+                    "square":  chess.square_name(sq),
+                })
+
+    return out
+
+
 # ── Registro central ───────────────────────────────────────────────────
 
 ALL_DETECTORS = [
@@ -655,6 +794,9 @@ ALL_DETECTORS = [
     detect_opposite_color_bishops,
     detect_piece_mobility_extremes,
     detect_static_trapped_piece,
+    detect_overloaded_pieces,
+    detect_exposed_king,
+    detect_pin_family,
     # caráter
     detect_center_type,
     detect_position_phase,

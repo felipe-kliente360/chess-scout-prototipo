@@ -67,6 +67,20 @@ Mesmas regras de myself/enemy: `full_reuse` → copia, `partial_regen` → regen
 | 10 | Sinais para próxima aula | `section_10_next_session` |
 | 11 | Programa de puzzles atribuído | `section_puzzle_program` (opcional) |
 
+**Seção 5 (padrão dominante) — use `tactical_profile` para diagnóstico tático do aluno:**
+
+`c.kpis.tactical_profile` disponibiliza:
+- `weighted_top`: top-5 temas ponderados por papel×modalidade. Use para nomear o **padrão dominante atual** — o 1º tema é o foco de prescrição da Seção 9. **Nomes seguem taxonomia Lichess** (`fork`, `pin`, `discoveredAttack`, `capturingDefender`, `backRankMate`, etc.).
+- `role_totals`:
+  - `A` alto → aluno não vê motivos quando estão disponíveis: prescrever **puzzle training de recognition**, não cálculo.
+  - `B` alto → erros do aluno são explorados: foco em **posições antes do lance errado** (prevenção, profilaxia).
+  - `C` alto → adversários são fracos e perdoam: aluno está evoluindo bem, elevar o nível dos oponentes.
+- `clock_tactics.pressure_blunder_ratio`: se > 2.0 → gestão de tempo é urgente; incluir exercícios com relógio (jogo rápido com limite restrito).
+- `clock_tactics.under_pressure.themes_top3`: os padrões que colapsa sob pressão — prescrever puzzles desses temas especificamente em modo blitz.
+- `trend_lines`: temas com `delta > 0` estão piorando — são os targets da próxima semana. Temas com `delta < 0` estão melhorando — mencionar como progresso observado.
+
+Woodpecker: temas de `puzzle_program.themes[].theme` são camelCase Lichess exato — passam direto para o Woodpecker montar o conjunto de treino do aluno.
+
 **Seção 4 (benchmark) — específico:** use `c.coach_benchmarks` (injetado pelo build.py em perspective=coach). Estrutura:
 ```
 {
@@ -80,7 +94,7 @@ Mesmas regras de myself/enemy: `full_reuse` → copia, `partial_regen` → regen
 Descreva onde o aluno está sem nomear os outros. Ex: "Score do aluno (5,5) está no percentil 60 entre os 6 alunos da base — acima da mediana mas abaixo do top-2. Win-rate 93% é alto mas vem de adversários fracos." Se `available=false` (n_students<2), pule explicando que ainda não há base de comparação suficiente.
 
 **Seção 9 (plano didático) — específico:** cronograma de 4 semanas em forma de tabela mental. Cada semana tem: foco temático, exercício concreto (livro/capítulo + 30min puzzle tema X), métrica para próxima aula. Exemplo:
-- Semana 1: meio-jogo combinatório — Yusupov vol.1 cap.5 + 30min/dia puzzles pin/trappedPiece em rating sugerido. Métrica: blunder rate cai de 22 para <15.
+- Semana 1: meio-jogo combinatório — Yusupov vol.1 cap.5 + 30min/dia puzzles (tema top-1 de `tactical_profile.weighted_top`, ex: `pin` ou `fork`) em rating sugerido pelo `puzzle_program`. Métrica: blunder rate cai de 22 para <15.
 - Semana 2: técnica de finais — Dvoretsky Endgame Manual cap.4 (Lucena) + cap.5 (Philidor). Métrica: na próxima sessão, demonstrar Lucena no quadro.
 - Semana 3: aprofundar repertório principal (Caro-Kann ou Sistema Londres) até 8 lances de teoria. Livro: Soltis Pawn Structure Chess para entender plano.
 - Semana 4: revisar 5 partidas paradigmáticas com o treinador, cada uma com foco em 1 técnica posicional (Silman Reassess Your Chess).

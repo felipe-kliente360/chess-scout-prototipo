@@ -490,6 +490,7 @@ A partir de 2026-04-29, o `compute.py` usa o módulo `position_facts.py` (24 det
 - **Cite o fato com a casa específica.** Em vez de "abertura é fraca", escreva *"Peão isolado em d4 e par de bispos contra (`bishop_pair:b`) — vantagem estática contrária; **Nimzowitsch** ensina que peão isolado deve ser bloqueado por cavalo."*
 - **Use `position_facts_top` na seção de pontos fortes/fracos.** Se `bishop_pair:w` aparece em 49 partidas com `win_rate_when_present` 93.9%, escreva *"Quando você tem par de bispos vence em 94% das vezes — explore ativamente posições abertas onde o par brilha."*
 - **Cruze tactical_theme com position_facts.** Se um `key_position` tem `tactical_theme: trappedPiece` E `position_facts` lista `pawn_shield_broken:w` + `long_diagonal_open`, a narrativa pode dizer *"Lance crítico: peça presa após escudo de peões quebrado e bispo adversário na diagonal longa — combinação clássica de Vukovic (`The Art of Attack`)."*
+- **Use `tactical_role` para diferenciar diagnóstico.** Papel A (oportunidade perdida) indica cegueira tática — o jogador não enxerga o padrão disponível. Papel B (erro punido) indica problema de cálculo/posicionamento. Papel C (erro não punido) indica adversário mais fraco — mencione apenas como contexto, nunca como mérito do jogador.
 - **Não cite fatos descritivos puros isoladamente** (`center_type`, `position_phase`, `castled`) — eles servem só para contexto. Use combinados com fatos diagnósticos.
 - **Escolha 2–3 fatos por posição na narrativa**, não exiba todos. Priorize os de maior impacto: `iqp`, `pawn_shield_broken`, `bad_bishop`, `passed_pawn`, `long_diagonal_open`, `static_trapped_piece`.
 
@@ -527,7 +528,79 @@ Trechos curtos para calibrar tom. **Use o estilo do "BOM" abaixo. Evite ostensiv
 
 ---
 
-## 22. Anatomia dos fingerprints táticos (`tactical_theme`)
+## 22. Papel tático (A/B/C) e pesos por modalidade
+
+Todo incidente tático registrado no `computed.json` carrega `tactical_role` ('A', 'B' ou 'C') e um `score` ponderado. O redator usa esses campos para calibrar a gravidade do diagnóstico.
+
+### Definição dos papéis
+
+| Papel | Nome | Condição | Peso base |
+|-------|------|----------|-----------|
+| **A** | Oportunidade perdida | Vez do jogador, `best_move` era tático, jogador não jogou — `loss_cp ≥ 50` | 2.0 |
+| **B** | Erro punido | Jogador errou (`loss_cp ≥ 100`), sequência forçada criou tática para adversário, adversário explorou | 1.0 |
+| **C** | Erro não punido | Igual ao B, mas adversário FALHOU em explorar a tática disponível | 0.5 |
+
+**Pesos por modalidade** (aplicados multiplicativamente):
+
+| Modalidade | Peso |
+|---|---|
+| Rapid | 2.0 |
+| Blitz | 1.0 |
+| Bullet | 0 (ignorado) |
+| Daily | 0 (ignorado) |
+
+### Como o look-ahead funciona (B e C)
+
+Um erro do jogador no ply N inicia uma busca em janela de 6 plies à frente. A busca prossegue enquanto os lances intermediários do jogador são razoavelmente forçados (`loss_cp < 150`). O primeiro lance do adversário com tema tático detectado (conf ≥ 0.30) dentro da janela é classificado como B (adversário encontrou, `loss_cp_opp < 100`) ou C (adversário falhou, `loss_cp_opp ≥ 100`). A distância em plies até o tema é armazenada em `tactic_distance` e produz um fator de decaimento causal `1/(1+0.2*(dist-1))`.
+
+### Dados disponíveis em `kpis.tactical_profile`
+
+```json
+{
+  "weighted_top": [
+    {"theme": "fork", "score": 14.4, "breakdown": {"A": 8.0, "B": 4.8, "C": 1.6}},
+    {"theme": "pin",  "score": 6.2,  "breakdown": {"A": 4.0, "B": 1.6, "C": 0.6}}
+  ],
+  "role_totals": {"A": 32.0, "B": 11.2, "C": 4.8},
+  "by_time_class": {
+    "rapid": [{"theme": "fork", "score": 8.0}],
+    "blitz": [{"theme": "pin",  "score": 3.2}]
+  },
+  "theme_facts_corr": {
+    "fork:A": [{"fact": "isolated_pawn:w", "n": 5}],
+    "pin:B":  [{"fact": "pawn_shield_broken:b", "n": 3}]
+  }
+}
+```
+
+### Narrativa modelo por papel
+
+**A** (peso máximo — diagnóstico primário):
+> "Fork em cavalo perdido 4× em rapid ponderado: 8.0 pontos táticos. Você tinha o garfo disponível mas não jogou. Padrão: peão isolado em d4 presente em 5 das 4 ocorrências — o centro aberto cria a casa para o cavalo mas você não a usa. Exercícios: puzzles de garfo com cavalo, níveis 1600–1800 no Lichess."
+
+**B** (peso médio — consequência de erro posicional):
+> "Pin punido 3× (4.8 pts): seu erro criou a linha, adversário explorou. Correlação: `pawn_shield_broken:b` em 3 de 3 casos — pin surgiu após escudo de rei quebrado."
+
+**C** (peso baixo — mencionar só se padrão frequente):
+> "Em 2 partidas você jogou mal mas adversário não viu a tática (C, 1.6 pts). Não conta como mérito — adversário de menor rating."
+
+### Novos detectores em position_facts (2026-05)
+
+Dois detectores adicionados que aparecem na correlação `theme_facts_corr`:
+
+- **`overloaded_piece`**: peça adversária defende 2+ peças valiosas (≥ cavalo) simultaneamente, ambas sob ataque. Indica motivo de sobrecarga — base para `deflection` e `capturingDefender`.
+  ```json
+  {"kind": "overloaded_piece", "color": "b", "piece": "R", "square": "e7",
+   "defending": ["d7", "f7"]}
+  ```
+- **`exposed_king`**: rei sem escudo de peões E coluna do rei aberta, no meio-jogo (n_pieces > 10). Indica fragilidade estrutural do rei.
+  ```json
+  {"kind": "exposed_king", "color": "w", "square": "e1", "shield_pawns": 0, "file_open": true}
+  ```
+
+---
+
+## 23. Anatomia dos fingerprints táticos (`tactical_theme`)
 
 Referência técnica de como `tactical_theme` é gerado. Útil para debug, novos detectores, ou rebuild do índice. **Implementação**: `scripts/build_tactical_index.py` (build offline) + `tactical-themes.js` (lookup runtime). Paridade JS↔Python validada com puzzles canônicos.
 

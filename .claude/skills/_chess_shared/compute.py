@@ -321,34 +321,67 @@ def compute_confidence_pct(n_games: int, depth: int | None, eco_coverage: float)
 
 
 CANONICAL_THEMES = {
-    "fork": "garfo — uma peça ataca duas ao mesmo tempo",
-    "pin": "cravada — peça presa que não pode mover sem expor outra",
-    "skewer": "espeto — força a peça da frente a sair, capturando a de trás",
-    "discovered_attack": "ataque descoberto — uma peça sai e revela ataque de outra",
-    "double_attack": "ataque duplo — duas ameaças simultâneas",
-    "deflection": "desvio — força peça defensora a sair de função",
-    "decoy": "isca — atrai peça para casa ruim",
-    "removing_defender": "remoção do defensor — captura ou afasta quem protege",
-    "back_rank": "fila do fundo — mate na 1ª/8ª linha por rei sem fuga",
-    "smothered_mate": "mate sufocado — cavalo dá mate com peças próprias bloqueando o rei",
-    "double_check": "xeque duplo — duas peças dão xeque, rei obrigado a mover",
-    "mate_in_2": "mate em 2 — sequência forçada",
-    "mate_in_3": "mate em 3",
-    "sacrifice": "sacrifício — entregar material por vantagem maior",
-    "zwischenzug": "lance intermediário — joga forçante antes do esperado",
-    "zugzwang": "obrigação de jogar — qualquer lance piora a posição",
-    "rook_endgame": "final de torres — Lucena, Philidor, atividade da torre",
-    "pawn_endgame": "final de peões — oposição, regra do quadrado",
-    "opposite_color_bishops": "bispos de cores opostas — frequente empate",
-    "opening_trap": "armadilha de abertura — explora erros típicos das primeiras jogadas",
-    "attack_on_king": "ataque ao rei — sacrifícios em h7/g7, abrir colunas",
-    "defensive_move": "lance defensivo — encontrar único movimento que salva",
+    # ── Temas Lichess (camelCase exato) ──
+    "fork":                  "garfo — uma peça ataca duas ao mesmo tempo",
+    "pin":                   "cravada — peça presa que não pode mover sem expor outra",
+    "skewer":                "espeto — força a peça da frente a sair, capturando a de trás",
+    "discoveredAttack":      "ataque descoberto — uma peça sai e revela ataque de outra",
+    "doubleCheck":           "xeque duplo — duas peças dão xeque, rei obrigado a mover",
+    "deflection":            "desvio — força peça defensora a sair de função",
+    "attraction":            "atração — atrai peça para casa ruim (isca)",
+    "capturingDefender":     "remoção do defensor — captura ou afasta quem protege",
+    "backRankMate":          "mate na fila do fundo — rei sem fuga na 1ª/8ª linha",
+    "smotheredMate":         "mate sufocado — cavalo dá mate com peças próprias bloqueando",
+    "mateIn1":               "mate em 1",
+    "mateIn2":               "mate em 2 — sequência forçada",
+    "mateIn3":               "mate em 3",
+    "mateIn4":               "mate em 4",
+    "mateIn5":               "mate em 5+",
+    "sacrifice":             "sacrifício — entregar material por vantagem maior",
+    "intermezzo":            "lance intermediário (intermezzo) — forçante antes do esperado",
+    "zugzwang":              "zugzwang — qualquer lance piora a posição",
+    "rookEndgame":           "final de torres — Lucena, Philidor, atividade da torre",
+    "pawnEndgame":           "final de peões — oposição, regra do quadrado",
+    "bishopEndgame":         "final de bispos",
+    "knightEndgame":         "final de cavalos",
+    "queenEndgame":          "final de damas",
+    "queenRookEndgame":      "final de dama e torre",
+    "attackingF2F7":         "ataque em f2/f7 — armadilha de abertura em casa fraca",
+    "kingsideAttack":        "ataque ao rei — sacrifícios em h7/g7, abrir colunas",
+    "queensideAttack":       "ataque na ala da dama",
+    "defensiveMove":         "lance defensivo — único movimento que salva",
+    "clearance":             "limpeza de casa — libera via para outra peça",
+    "interference":          "interferência — bloqueia linha de defesa do adversário",
+    "overloading":           "sobrecarga — peça defensora com tarefas demais",
+    "trappedPiece":          "peça presa — sem escapatória sem perda material",
+    "exposedKing":           "rei exposto — sem cobertura de peões, vulnerável",
+    "promotion":             "promoção — peão chega à 8ª fileira",
+    "underPromotion":        "subpromoção — promove para cavalo, bispo ou torre",
+    "enPassant":             "en passant",
+    "castling":              "roque — aproveitar direito de roque taticamente",
+    "xRayAttack":            "raio X — ataque que atravessa peça intermediária",
+    "zugzwang":              "zugzwang — qualquer lance piora a posição",
+    "equality":              "igualdade — encontrar recurso que equilibra",
+    "advantage":             "vantagem — não é mate mas ganha material significativo",
+    "crushing":              "esmagador — ganho de material com posição dominante",
+    "master":                "tema de mestre — padrão recorrente em nível avançado",
+    "masterVsMaster":        "mestre vs mestre",
+    "superGM":               "super-GM",
+    "middlegame":            "meio-jogo",
+    "endgame":               "final",
+    "opening":               "abertura",
+    "short":                 "sequência curta (≤5 lances)",
+    "long":                  "sequência longa (>5 lances)",
+    "veryLong":              "sequência muito longa",
+    "oneMove":               "solução de 1 lance",
 }
 
 
-def derive_puzzle_program(games_df, by_phase, kpis, head_to_head, time_classes):
+def derive_puzzle_program(games_df, by_phase, kpis, head_to_head, time_classes,
+                          tactical_profile=None):
     """Sugere rating de puzzles + temas táticos a treinar.
-    Estrutura consumível por um app externo de treino tático."""
+    Nomes de tema seguem taxonomia Lichess (camelCase) — compatível com Woodpecker.
+    tactical_profile.weighted_top injeta fraquezas detectadas nas partidas do jogador."""
     rating_basis = None
     rating_value = None
     if "my_rating" in games_df.columns:
@@ -369,60 +402,97 @@ def derive_puzzle_program(games_df, by_phase, kpis, head_to_head, time_classes):
     rating_hi = min(2800, rating_value + 100)
 
     themes = []
+    seen: set[str] = set()
+
+    # ── 1. Fraquezas detectadas nas partidas (fonte mais fidedigna) ──────────
+    if tactical_profile:
+        weighted_top = tactical_profile.get("weighted_top", [])
+        for entry in weighted_top[:4]:
+            theme = str(entry.get("theme", "")).strip()
+            if not theme or theme in seen:
+                continue
+            score = entry.get("score", 0)
+            breakdown = entry.get("breakdown", {})
+            role_a = breakdown.get("A", 0)
+            # Papel A = jogador não viu o tema; prioridade mais alta
+            priority = "alta" if role_a >= score * 0.5 else "média"
+            rationale = f"detectado {score:.1f} pts ponderados nas suas partidas"
+            if role_a > 0:
+                rationale += f" (papel A={role_a:.1f} — oportunidade desperdiçada)"
+            themes.append({"theme": theme, "priority": priority, "rationale": rationale,
+                           "source": "detected"})
+            seen.add(theme)
+
+    # ── 2. Heurísticas por fase (complementam se não houver detecção suficiente) ──
     total_errs = max(1, kpis.get("blunders", 0) + kpis.get("mistakes", 0))
     final_errs = by_phase["final"]["blunders"] + by_phase["final"]["mistakes"]
     open_errs = by_phase["abertura"]["blunders"] + by_phase["abertura"]["mistakes"]
     mid_errs = by_phase["meio-jogo"]["blunders"] + by_phase["meio-jogo"]["mistakes"]
 
     if final_errs / total_errs >= 0.4:
-        themes += [
-            {"theme": "rook_endgame", "priority": "alta",
-             "rationale": f"{final_errs}/{total_errs} erros graves+médios estão no final"},
-            {"theme": "pawn_endgame", "priority": "média",
-             "rationale": "completa o reforço técnico de finais"},
-        ]
-    if open_errs / total_errs >= 0.3:
-        themes.append({"theme": "opening_trap", "priority": "alta",
-                       "rationale": f"{open_errs} erros graves+médios na abertura"})
-    if mid_errs / total_errs >= 0.4:
-        themes.append({"theme": "double_attack", "priority": "alta",
-                       "rationale": f"{mid_errs} erros no meio-jogo — falha em ver ameaças simultâneas"})
+        for t in ["rookEndgame", "pawnEndgame"]:
+            if t not in seen:
+                themes.append({"theme": t, "priority": "alta",
+                               "rationale": f"{final_errs}/{total_errs} erros graves+médios no final",
+                               "source": "heuristic"})
+                seen.add(t)
+    if open_errs / total_errs >= 0.3 and "attackingF2F7" not in seen:
+        themes.append({"theme": "attackingF2F7", "priority": "alta",
+                       "rationale": f"{open_errs} erros na abertura",
+                       "source": "heuristic"})
+        seen.add("attackingF2F7")
+    if mid_errs / total_errs >= 0.4 and "fork" not in seen:
+        themes.append({"theme": "fork", "priority": "alta",
+                       "rationale": f"{mid_errs} erros no meio-jogo — padrão tático mais comum",
+                       "source": "heuristic"})
+        seen.add("fork")
 
+    # ── 3. Fundamentos por rating ────────────────────────────────────────────
     if rating_value < 1000:
-        themes += [
-            {"theme": "fork", "priority": "alta", "rationale": "fundamento tático básico < 1000"},
-            {"theme": "pin", "priority": "alta", "rationale": "fundamento tático básico"},
-            {"theme": "back_rank", "priority": "média", "rationale": "padrão de mate frequente nessa faixa"},
-        ]
+        for t, pr, rat in [
+            ("fork",        "alta",  "fundamento tático básico < 1000"),
+            ("pin",         "alta",  "fundamento tático básico"),
+            ("backRankMate","média", "padrão de mate frequente nessa faixa"),
+        ]:
+            if t not in seen:
+                themes.append({"theme": t, "priority": pr, "rationale": rat, "source": "rating"})
+                seen.add(t)
     elif rating_value < 1400:
-        themes += [
-            {"theme": "discovered_attack", "priority": "alta", "rationale": "padrão típico de evolução 1000-1400"},
-            {"theme": "deflection", "priority": "média", "rationale": "começa a aparecer em puzzles dessa faixa"},
-            {"theme": "back_rank", "priority": "média", "rationale": "mate ainda frequente"},
-        ]
+        for t, pr, rat in [
+            ("discoveredAttack","alta",  "padrão típico de evolução 1000-1400"),
+            ("deflection",     "média", "começa a aparecer em puzzles dessa faixa"),
+            ("backRankMate",   "média", "mate ainda frequente"),
+        ]:
+            if t not in seen:
+                themes.append({"theme": t, "priority": pr, "rationale": rat, "source": "rating"})
+                seen.add(t)
     elif rating_value < 1800:
-        themes += [
-            {"theme": "removing_defender", "priority": "alta", "rationale": "tema central da faixa 1400-1800"},
-            {"theme": "skewer", "priority": "média", "rationale": "padrão refinado, mais raro mas decisivo"},
-            {"theme": "attack_on_king", "priority": "média", "rationale": "ataques temáticos começam a aparecer"},
-        ]
+        for t, pr, rat in [
+            ("capturingDefender","alta",  "tema central da faixa 1400-1800"),
+            ("skewer",           "média", "padrão refinado, mais raro mas decisivo"),
+            ("kingsideAttack",   "média", "ataques temáticos começam a aparecer"),
+        ]:
+            if t not in seen:
+                themes.append({"theme": t, "priority": pr, "rationale": rat, "source": "rating"})
+                seen.add(t)
     else:
-        themes += [
-            {"theme": "zwischenzug", "priority": "alta", "rationale": "tema avançado, decisivo em jogo de qualidade"},
-            {"theme": "zugzwang", "priority": "média", "rationale": "essencial em finais de alto nível"},
-            {"theme": "sacrifice", "priority": "média", "rationale": "cálculo profundo de compensação"},
-        ]
+        for t, pr, rat in [
+            ("intermezzo",  "alta",  "tema avançado, decisivo em jogo de qualidade"),
+            ("zugzwang",    "média", "essencial em finais de alto nível"),
+            ("sacrifice",   "média", "cálculo profundo de compensação"),
+        ]:
+            if t not in seen:
+                themes.append({"theme": t, "priority": pr, "rationale": rat, "source": "rating"})
+                seen.add(t)
 
-    if "bullet" in (time_classes or []):
-        themes.append({"theme": "mate_in_2", "priority": "média",
-                       "rationale": "reflexo em padrões curtos compensa pressão de tempo"})
+    if "bullet" in (time_classes or []) and "mateIn2" not in seen:
+        themes.append({"theme": "mateIn2", "priority": "média",
+                       "rationale": "reflexo em padrões curtos compensa pressão de tempo",
+                       "source": "heuristic"})
+        seen.add("mateIn2")
 
-    seen = set()
     unique_themes = []
     for t in themes:
-        if t["theme"] in seen:
-            continue
-        seen.add(t["theme"])
         t["label"] = CANONICAL_THEMES.get(t["theme"], t["theme"])
         unique_themes.append(t)
 
@@ -799,6 +869,371 @@ def load_from_db(username: str) -> tuple[pd.DataFrame, pd.DataFrame, int | None,
     return games_df, an_df, depth_min, stamp
 
 
+# ── Classificação de papel tático (A/B/C) ─────────────────────────────────
+
+# Pesos de papel: A=oportunidade perdida, B=erro punido, C=erro não punido
+_ROLE_WEIGHTS: dict[str, float] = {"A": 2.0, "B": 1.0, "C": 0.5}
+
+# Pesos por modalidade: rapid e blitz pesam; bullet e daily ignorados
+_TC_WEIGHTS: dict[str, float] = {"rapid": 2.0, "blitz": 1.0, "bullet": 0.0, "daily": 0.0}
+
+# Fatos puramente descritivos — excluídos de correlações táticas
+_PURE_DESCRIPTIVE = {"center_type", "position_phase", "castled", "opposite_side_castles",
+                     "opposite_color_bishops"}
+
+
+def _find_causal_tactic(
+    rows: list[dict],
+    start_idx: int,
+    player_color: str,
+    error_threshold: float = 100.0,
+    forced_threshold: float = 150.0,
+    window_size: int = 6,
+) -> dict | None:
+    """Busca o tema tático que o adversário pode explorar (B/C) após o erro
+    do jogador em start_idx. Varre plies à frente até window_size,
+    seguindo a sequência enquanto os lances intermediários do jogador são
+    razoavelmente forçados (loss_cp < forced_threshold).
+
+    Retorna dict {role, theme, confidence, ply, distance} ou None.
+    """
+    n = len(rows)
+    for lookahead in range(1, window_size + 1):
+        idx = start_idx + lookahead
+        if idx >= n:
+            break
+        row = rows[idx]
+        is_player = (row.get("side_to_move") == player_color)
+
+        if not is_player:
+            # Lance do adversário — tema disponível?
+            theme = str(row.get("tactical_theme") or "").strip()
+            conf = float(row.get("tactical_confidence") or 0)
+            if theme and conf >= 0.30:
+                loss_opp = float(row.get("loss_cp") or 0)
+                role = "B" if loss_opp < error_threshold else "C"
+                return {
+                    "role":       role,
+                    "theme":      theme,
+                    "confidence": conf,
+                    "ply":        row.get("ply"),
+                    "distance":   lookahead,
+                }
+        else:
+            # Lance intermediário do jogador — continua se não é novo erro grave
+            player_loss = float(row.get("loss_cp") or 0)
+            if player_loss >= forced_threshold:
+                break  # novo erro; encerra atribuição ao erro original
+    return None
+
+
+def classify_tactical_roles(
+    moves_df: pd.DataFrame,
+    user_color_by_game: dict[int, str],
+) -> pd.DataFrame:
+    """Adiciona coluna 'tactical_role' ('A', 'B', 'C', None) em moves_df.
+
+    A — jogador tinha tema tático disponível (best_move era tático) e não jogou.
+    B — jogador errou, criou tática para o adversário, adversário explorou.
+    C — jogador errou, criou tática para o adversário, adversário não explorou.
+
+    Também adiciona 'tactic_distance' (quantos plies do erro até o tema B/C).
+    """
+    moves_df = moves_df.copy()
+    moves_df["tactical_role"] = None
+    moves_df["tactic_distance"] = None
+
+    for game_idx, group in moves_df.groupby("game_index"):
+        group = group.sort_values("ply").reset_index(drop=True)
+        player_color = user_color_by_game.get(int(game_idx), "")
+        rows = group.to_dict("records")
+
+        for i, row in enumerate(rows):
+            theme = str(row.get("tactical_theme") or "").strip()
+            conf = float(row.get("tactical_confidence") or 0)
+            if not theme or conf < 0.30:
+                continue
+
+            is_player = (row.get("side_to_move") == player_color)
+            loss = float(row.get("loss_cp") or 0)
+
+            orig_idx = group.index[i]
+
+            if is_player and loss >= 50:
+                # Tipo A: jogador tinha tema no best_move, jogou outra coisa
+                moves_df.at[orig_idx, "tactical_role"] = "A"
+                moves_df.at[orig_idx, "tactic_distance"] = 0
+
+            elif not is_player and i > 0:
+                # Lance do adversário com tema — busca se veio de erro do jogador
+                prev = rows[i - 1]
+                prev_loss = float(prev.get("loss_cp") or 0)
+                if prev_loss >= 100:
+                    # Erro imediato do jogador → B/C direto
+                    role = "B" if loss < 100 else "C"
+                    prev_orig = group.index[i - 1]
+                    if moves_df.at[prev_orig, "tactical_role"] is None:
+                        moves_df.at[prev_orig, "tactical_role"] = role
+                        moves_df.at[prev_orig, "tactic_distance"] = 1
+
+            elif is_player and loss >= 100:
+                # Erro do jogador — busca tema causal em lances futuros do adversário
+                result = _find_causal_tactic(rows, i, player_color)
+                if result:
+                    orig_idx = group.index[i]
+                    if moves_df.at[orig_idx, "tactical_role"] is None:
+                        moves_df.at[orig_idx, "tactical_role"] = result["role"]
+                        moves_df.at[orig_idx, "tactic_distance"] = result["distance"]
+
+    return moves_df
+
+
+def aggregate_tactical_weighted(
+    moves_df: pd.DataFrame,
+    game_tc_map: dict[int, str],
+) -> tuple[list[dict], dict, dict, list[dict]]:
+    """Agrega temas táticos com pesos por papel (A/B/C) e modalidade (rapid/blitz).
+
+    Retorna (weighted_top5, role_totals, by_time_class, timeline_rows).
+    timeline_rows = lista de dicts prontos para emit_tactical_timeline.
+    """
+    from collections import defaultdict
+
+    weighted: dict[str, float] = defaultdict(float)
+    breakdown: dict[str, dict[str, float]] = defaultdict(lambda: {"A": 0.0, "B": 0.0, "C": 0.0})
+    by_tc: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    role_totals: dict[str, float] = {"A": 0.0, "B": 0.0, "C": 0.0}
+
+    # Para timeline longitudinal: (period, time_class, theme, role) → (weighted, raw)
+    timeline: dict[tuple, list] = defaultdict(lambda: [0.0, 0])
+
+    flagged = moves_df[
+        (moves_df.get("tactical_role") is not None
+         if "tactical_role" not in moves_df.columns
+         else moves_df["tactical_role"].notna())
+        & (moves_df["tactical_theme"].fillna("") != "")
+        & (moves_df["loss_cp"] >= 50)
+    ].copy() if "tactical_role" in moves_df.columns else pd.DataFrame()
+
+    if not len(flagged):
+        return [], role_totals, {}, []
+
+    # Pesos relativos para top-3 temas por posição (1º = 1.0, 2º = 0.5, 3º = 0.25)
+    _RANK_FACTOR = [1.0, 0.5, 0.25]
+
+    for _, row in flagged.iterrows():
+        role = str(row.get("tactical_role") or "B")
+        tc = game_tc_map.get(int(row.get("game_index", 0)), "blitz")
+
+        tc_w = _TC_WEIGHTS.get(tc, 0.0)
+        if tc_w == 0.0:
+            continue  # bullet/daily ignorados
+
+        role_w = _ROLE_WEIGHTS.get(role, 1.0)
+        dist = row.get("tactic_distance")
+        dist_factor = 1.0 / (1 + 0.2 * ((int(dist) - 1) if dist and int(dist) > 1 else 0))
+
+        date_str = str(row.get("date") or "")
+        period = date_str[:7] if len(date_str) >= 7 else "unknown"
+
+        # Constrói lista de (theme, rank_factor) a partir de tactical_themes (top-3)
+        # ou cai de volta para tactical_theme (top-1) se array não disponível.
+        theme_entries: list[tuple[str, float]] = []
+        raw_arr = row.get("tactical_themes")
+        if raw_arr and str(raw_arr) not in ("", "nan", "null", "None"):
+            try:
+                import json as _json
+                parsed = _json.loads(str(raw_arr))
+                if isinstance(parsed, list):
+                    for rank, item in enumerate(parsed[:3]):
+                        t = str(item.get("theme", "") if isinstance(item, dict) else item).strip()
+                        if t:
+                            theme_entries.append((t, _RANK_FACTOR[rank]))
+            except Exception:
+                pass
+        if not theme_entries:
+            t = str(row.get("tactical_theme") or "").strip()
+            if t:
+                theme_entries = [(t, 1.0)]
+
+        for theme, rank_f in theme_entries:
+            w = role_w * tc_w * dist_factor * rank_f
+
+            weighted[theme] += w
+            breakdown[theme][role] += w
+            by_tc[tc][theme] += w
+            role_totals[role] = role_totals.get(role, 0.0) + w
+
+            key = (period, tc, theme, role)
+            timeline[key][0] += w
+            timeline[key][1] += 1
+
+    top5 = sorted(weighted.items(), key=lambda x: -x[1])[:5]
+    weighted_top = [
+        {
+            "theme":     t,
+            "score":     round(s, 2),
+            "breakdown": {k: round(v, 2) for k, v in breakdown[t].items()},
+        }
+        for t, s in top5
+    ]
+
+    by_tc_out = {
+        tc: sorted(themes.items(), key=lambda x: -x[1])[:3]
+        for tc, themes in by_tc.items()
+    }
+
+    timeline_rows = [
+        {
+            "period":       k[0],
+            "time_class":   k[1],
+            "theme":        k[2],
+            "role":         k[3],
+            "weighted_sum": round(v[0], 4),
+            "raw_count":    v[1],
+        }
+        for k, v in timeline.items()
+    ]
+
+    return weighted_top, role_totals, by_tc_out, timeline_rows
+
+
+def correlate_theme_facts(moves_df: pd.DataFrame) -> dict[str, list[dict]]:
+    """Para cada tema+papel, quais position_facts ocorrem mais frequentemente?
+    Retorna {\"fork:A\": [{\"fact\": \"isolated_pawn:w\", \"n\": 5}, ...], ...}"""
+    from collections import defaultdict
+
+    theme_fact_counter: dict[str, Counter] = defaultdict(Counter)
+
+    flagged = moves_df[
+        moves_df.get("tactical_role", pd.Series()).notna()
+        & (moves_df["tactical_theme"].fillna("") != "")
+        & (moves_df["loss_cp"] >= 50)
+    ] if "tactical_role" in moves_df.columns else pd.DataFrame()
+
+    for _, row in flagged.iterrows():
+        theme = str(row.get("tactical_theme") or "").strip()
+        role = str(row.get("tactical_role") or "")
+        if not theme or not role:
+            continue
+        facts_raw = row.get("position_facts")
+        if not facts_raw:
+            continue
+        try:
+            facts = json.loads(facts_raw) if isinstance(facts_raw, str) else facts_raw
+        except Exception:
+            continue
+        key = f"{theme}:{role}"
+        for fact in (facts or []):
+            kind = fact.get("kind", "")
+            if kind in _PURE_DESCRIPTIVE:
+                continue
+            color = fact.get("color", "")
+            fkey = f"{kind}:{color}" if color else kind
+            theme_fact_counter[key][fkey] += 1
+
+    return {
+        k: [{"fact": f, "n": n} for f, n in cnt.most_common(3)]
+        for k, cnt in theme_fact_counter.items()
+        if cnt
+    }
+
+
+def _compute_trend_lines(timeline_rows: list[dict]) -> list[dict]:
+    """Agrega timeline_rows por (tema, period) e retorna deltas entre os 2 períodos mais recentes.
+
+    Retorna lista de {theme, period_prev, period_curr, score_prev, score_curr, delta}.
+    """
+    from collections import defaultdict
+
+    # Soma weighted_sum por (theme, period) independente de role/tc
+    by_theme_period: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for row in timeline_rows:
+        theme = row.get("theme", "")
+        period = row.get("period", "")
+        ws = float(row.get("weighted_sum", 0))
+        if theme and period and period != "unknown":
+            by_theme_period[theme][period] += ws
+
+    if not by_theme_period:
+        return []
+
+    # Descobre os 2 períodos mais recentes globalmente
+    all_periods = sorted({p for th in by_theme_period.values() for p in th}, reverse=True)
+    if len(all_periods) < 2:
+        return []
+
+    curr_period, prev_period = all_periods[0], all_periods[1]
+    trends = []
+    for theme, periods in by_theme_period.items():
+        curr = round(periods.get(curr_period, 0.0), 2)
+        prev = round(periods.get(prev_period, 0.0), 2)
+        if curr == 0 and prev == 0:
+            continue
+        trends.append({
+            "theme":       theme,
+            "period_prev": prev_period,
+            "period_curr": curr_period,
+            "score_prev":  prev,
+            "score_curr":  curr,
+            "delta":       round(curr - prev, 2),
+        })
+
+    trends.sort(key=lambda x: -abs(x["delta"]))
+    return trends[:10]
+
+
+def compute_clock_tactics_split(moves_df: pd.DataFrame) -> dict:
+    """Correlação pressão de relógio × erros táticos.
+
+    Retorna {under_pressure: {blunder_rate, themes_top3},
+             normal: {blunder_rate, themes_top3},
+             pressure_blunder_ratio}.
+    """
+    if "low_time" not in moves_df.columns or "tactical_role" not in moves_df.columns:
+        return {}
+
+    flagged = moves_df[
+        moves_df["tactical_role"].notna()
+        & (moves_df["loss_cp"] >= 50)
+    ].copy() if "tactical_role" in moves_df.columns else pd.DataFrame()
+
+    if not len(flagged):
+        return {}
+
+    def _top3(sub: pd.DataFrame) -> list[str]:
+        theme_col = "tactical_theme" if "tactical_theme" in sub.columns else None
+        if not theme_col:
+            return []
+        c = Counter(sub[theme_col].dropna().tolist())
+        return [t for t, _ in c.most_common(3)]
+
+    pressure_mask = flagged["low_time"].fillna(False).astype(bool)
+    under = flagged[pressure_mask]
+    normal = flagged[~pressure_mask]
+
+    all_moves = moves_df[moves_df["loss_cp"] >= 0] if "loss_cp" in moves_df.columns else moves_df
+    total_pressure = len(all_moves[all_moves["low_time"].fillna(False).astype(bool)])
+    total_normal = len(all_moves[~all_moves["low_time"].fillna(False).astype(bool)])
+
+    br_pressure = len(under) / max(1, total_pressure)
+    br_normal = len(normal) / max(1, total_normal)
+
+    return {
+        "under_pressure": {
+            "n_errors": int(len(under)),
+            "blunder_rate": round(br_pressure, 4),
+            "themes_top3": _top3(under),
+        },
+        "normal": {
+            "n_errors": int(len(normal)),
+            "blunder_rate": round(br_normal, 4),
+            "themes_top3": _top3(normal),
+        },
+        "pressure_blunder_ratio": round(br_pressure / max(0.001, br_normal), 2),
+    }
+
+
 def main():
     if len(sys.argv) < 2:
         raise SystemExit("Uso: python compute.py <username>")
@@ -912,6 +1347,9 @@ def main():
     moves_df["is_user_move"] = moves_df.apply(
         lambda r: user_color_by_game.get(r["game_index"]) == r["side_to_move"], axis=1
     )
+
+    # ── Classificação de papel tático A/B/C em todos os plies ────────────
+    moves_df = classify_tactical_roles(moves_df, user_color_by_game)
 
     user_moves_all = moves_df[moves_df["is_user_move"]]
 
@@ -1052,29 +1490,43 @@ def main():
     # ── Agregados de fatos estruturais (position_facts) ──────────────
     # Roda detect_position_facts no FEN do worst_move de cada partida e
     # agrega: top fatos absolutos + correlação com resultado (W/L/D).
-    # Filtra fatos descritivos puros (center_type, position_phase, castled)
-    # que não trazem diagnóstico isolado.
-    _PURE_DESCRIPTIVE = {"center_type", "position_phase", "castled", "opposite_side_castles"}
     facts_counter = Counter()
     facts_corr: dict[str, dict[str, int]] = {}
-    # game_metrics será populado abaixo. Vamos popular depois numa segunda passada.
-    # Conta temas só em lances do usuário com erro (loss_cp >= 50) — temas em
-    # lances quietos do solver poluem o ranking. Confidence mínima 0.30 para
-    # evitar fingerprints com classificação ambígua.
-    tactical_top = []
-    tactical_by_phase = {"abertura": [], "meio-jogo": [], "final": []}
+
+    # ── Agregação tática ponderada (A/B/C × rapid/blitz) ──────────────────
+    # Mapa game_index → time_class para pesos de modalidade
+    game_tc_map = {
+        int(row["index"]): str(row.get("time_class") or "")
+        for _, row in games_df.iterrows()
+    }
+    # user_moves já tem tactical_role (de classify_tactical_roles); adiciona date
+    date_by_game = {int(row["index"]): str(row.get("date") or "") for _, row in games_df.iterrows()}
+    user_moves = user_moves.copy()
+    user_moves["date"] = user_moves["game_index"].map(date_by_game)
+    user_moves["time_class_tc"] = user_moves["game_index"].map(game_tc_map)
+
+    tactical_weighted_top, role_totals, tactical_by_tc, _timeline_rows = \
+        aggregate_tactical_weighted(user_moves, game_tc_map)
+    theme_facts_corr = correlate_theme_facts(user_moves)
+    clock_tactics_split = compute_clock_tactics_split(user_moves)
+
+    # Compatibilidade: mantém tactical_top no formato legado (n = raw count)
+    tactical_top: list[dict] = []
+    tactical_by_phase: dict[str, list] = {"abertura": [], "meio-jogo": [], "final": []}
     if "tactical_theme" in user_moves.columns:
-        flagged = user_moves[(user_moves["loss_cp"] >= 50) & (user_moves["tactical_theme"] != "")]
-        if len(flagged):
+        flagged_legacy = user_moves[
+            (user_moves["loss_cp"] >= 50) & (user_moves["tactical_theme"].fillna("") != "")
+        ]
+        if len(flagged_legacy):
             try:
-                conf_series = pd.to_numeric(flagged["tactical_confidence"], errors="coerce").fillna(0.0)
-                flagged = flagged[conf_series >= 0.30]
+                conf_s = pd.to_numeric(flagged_legacy["tactical_confidence"], errors="coerce").fillna(0.0)
+                flagged_legacy = flagged_legacy[conf_s >= 0.30]
             except Exception:
                 pass
-            theme_counter = Counter(flagged["tactical_theme"].tolist())
+            theme_counter = Counter(flagged_legacy["tactical_theme"].tolist())
             tactical_top = [{"theme": t, "n": n} for t, n in theme_counter.most_common(5)]
             for ph in ["abertura", "meio-jogo", "final"]:
-                sub = flagged[flagged["phase"] == ph]
+                sub = flagged_legacy[flagged_legacy["phase"] == ph]
                 if len(sub):
                     pc = Counter(sub["tactical_theme"].tolist())
                     tactical_by_phase[ph] = [{"theme": t, "n": n} for t, n in pc.most_common(3)]
@@ -1647,6 +2099,7 @@ def main():
         kpis={"blunders": cat_counts.get("blunder", 0), "mistakes": cat_counts.get("mistake", 0)},
         head_to_head=head_to_head,
         time_classes=time_classes,
+        tactical_profile={"weighted_top": tactical_weighted_top},
     )
 
     # ── Score canônico (kpis.score_10) — Opção B: competitivo como base ──
@@ -1716,6 +2169,15 @@ def main():
             "good_moves": cat_counts.get("good", 0),
             "tactical_themes_top": tactical_top,
             "tactical_themes_by_phase": tactical_by_phase,
+            "tactical_profile": {
+                "weighted_top":      tactical_weighted_top,
+                "role_totals":       {k: round(v, 2) for k, v in role_totals.items()},
+                "by_time_class":     {tc: [{"theme": t, "score": round(s, 2)} for t, s in items]
+                                      for tc, items in tactical_by_tc.items()},
+                "theme_facts_corr":  theme_facts_corr,
+                "clock_tactics":     clock_tactics_split,
+                "trend_lines":       _compute_trend_lines(_timeline_rows),
+            },
             "position_facts_top": position_facts_top,
             "position_facts_correlation": facts_corr,
         },
@@ -1742,11 +2204,16 @@ def main():
     out_path = DATA_DIR / f"{username}_{stamp}_computed.json"
     out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # Persistência longitudinal (SQLite) + cache de position_facts.
+    # Persistência longitudinal (SQLite) + cache de position_facts + timeline tática.
     try:
-        from history import open_db, record_analysis, update_position_facts_batch
+        from history import (open_db, record_analysis, update_position_facts_batch,
+                             emit_tactical_timeline)
         conn = open_db(DATA_DIR / "db" / "history.db")
         record_analysis(conn, payload, perspective=None)
+        # Timeline tática longitudinal
+        if _timeline_rows:
+            n_tl = emit_tactical_timeline(conn, username, _timeline_rows)
+            print(f"   📈 tactical_timeline: {n_tl} entradas atualizadas")
         # Cache de position_facts: para cada lance flagrado cujo facts foi
         # computado in-flight, grava o JSON na coluna position_facts. Próxima
         # execução de compute lê direto, sem recomputar.
