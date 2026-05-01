@@ -239,7 +239,14 @@ python3.12 .claude/skills/_chess_shared/build.py <user> enemy
 /opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/cache_lookup.py <user> <myself|enemy|coach>
 
 # Backend Stockfish nativo (rode em outro terminal)
-/opt/homebrew/bin/python3.12 scripts/analyze_worker.py --workers 4 --depth 18
+/opt/homebrew/bin/python3.12 scripts/analyze_worker.py --workers 1 --threads 4 --hash 256
+# Flags disponíveis:
+#   --movetime1 1000   pass 1 ms (default 1000) — todas as posições
+#   --movetime2 2000   pass 2 ms (default 2000) — só suspeitas (~15%)
+#   --threads N        threads SF (default cpu_count)
+#   --hash MB          hash table SF (default 256; env SF_HASH_MB)
+#   --loss-thresh cp   threshold loss_cp para suspeita (default 40)
+#   --once             processa fila e sai
 
 # Redactor automático (requer ANTHROPIC_API_KEY)
 /opt/homebrew/bin/python3.12 .claude/skills/_chess_shared/redactor.py <user> <perspective>
@@ -299,4 +306,4 @@ Quando algo não está claro ou destoa de uma decisão prévia, eu pergunto ante
 - Quando um padrão técnico da seção 3 mudar.
 - Quando emergir uma lição da seção 7 que valha registrar.
 
-Última atualização: 2026-04-29 — pós backend Stockfish nativo + redactor automático + anti-cheat + estado persistente do DB.
+Última atualização: 2026-05-01 — analyze_worker 2-pass (movetime + FEN cache + threads fixo); taxonomia tática Lichess; tactical_profile completo (clock_tactics, trend_lines); detect_pin_family.
