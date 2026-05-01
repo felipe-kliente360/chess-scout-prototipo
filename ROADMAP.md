@@ -219,6 +219,64 @@ Compute.py + build.py somam ~10s e zero token.
 
 ---
 
+## 🪝 API para Woodpecker App
+
+Expor o pipeline de análise tática como API HTTP para que o app Woodpecker solicite análise de um jogador e receba um plano de temas táticos para treino — sem depender da máquina local estar ligada.
+
+### Premissas
+
+- **Sem LLM/Anthropic**: `puzzle_program` é 100% determinístico — sai do `compute.py` sem IA.
+- **Engine**: `stockfish.online` API (já integrado como `ENGINE=api`). Dispensa binário no servidor, reduz RAM.
+- **Persistência**: SQLite no disco do servidor (mesmo schema atual). Cada jogador acumula histórico entre chamadas.
+- **Infra**: Google Cloud e2-micro (always free, us-east1/us-west1/us-central1) — 1GB RAM, 30GB disco. Gerenciado via systemd, deploy via `git pull`.
+
+### API — contratos
+
+```
+POST /api/woodpecker/analyze
+{ "username": "miguelrov", "games": 30, "webhook_url": "https://woodpecker.app/cb/..." }
+→ { "job_id": "abc123", "status": "queued", "estimated_seconds": 480 }
+
+GET /api/woodpecker/jobs/{job_id}
+→ { "status": "running|done|error", "progress": { "games": 12, "total": 30 } }
+
+GET /api/woodpecker/jobs/{job_id}/result
+→ { "username": "...", "tactical_confidence": {...}, "puzzle_program": { "suggested_rating": 1200,
+    "themes": [{ "theme": "fork", "priority": "high", "source": "detected" }, ...] } }
+
+POST {webhook_url}   ← chamado pelo servidor quando job termina
+{ "job_id": "...", "username": "...", "status": "completed", "puzzle_program": {...} }
+```
+
+### O que precisa ser construído (neste repo)
+
+| Componente | Arquivo | Esforço |
+|---|---|---|
+| Port Python do classificador tático | `scripts/tactical_classifier.py` | ~4h |
+| Endpoints `/api/woodpecker/*` | `scripts/serve.py` | ~3h |
+| Worker adaptado: fetch Chess.com server-side + stockfish.online + webhook | `scripts/woodpecker_worker.py` | ~4h |
+| Tabela `woodpecker_jobs` no schema | `.claude/skills/_chess_shared/history.py` | ~1h |
+| Serviços systemd (persistência no GCP) | `deploy/serve.service` + `deploy/woodpecker-worker.service` | ~1h |
+
+**Total estimado: ~13h**
+
+### Configuração GCP (passos externos ao repo)
+
+1. Compute Engine → Create Instance: `e2-micro`, região `us-east1`, Debian 12, 30GB standard disk.
+2. Firewall: abrir TCP 8000 (VPC Network → Firewall Rules).
+3. SSH (browser): `git clone`, `pip3 install pandas python-chess`, `mkdir -p data/db`.
+4. Copiar `deploy/*.service` → `/etc/systemd/system/`, `systemctl enable + start`.
+5. URL final para o Woodpecker: `http://<IP-EXTERNO>:8000/api/woodpecker/analyze`.
+6. Updates futuros: `git pull && systemctl restart chess-scout`.
+
+### Decisões em aberto
+
+- Autenticação da API (API key no header vs IP allowlist do servidor Woodpecker).
+- Timeout máximo de job — 30 partidas × ~300 posições × 1s = ~8 min; definir TTL de expiração.
+- Woodpecker faz polling ou só recebe webhook? (polling é mais simples pra começar).
+
+---
+
 ## 🐛 Bugs/débitos técnicos abertos
 
 - **Coverage de testes**: helpers cobertos, mas pipeline end-to-end (compute → JSON) não tem teste de integração com fixture pequena.
