@@ -51,10 +51,8 @@ Sobe servidor stdlib (`scripts/serve.py`) em `http://127.0.0.1:8000/` em backgro
 Abrir **http://127.0.0.1:8000/** (badge verde fixo `SERVER MODE · history.db` confirma o modo). Define:
 
 - **Username** chess.com
-- **Quantidade** partidas/formato — cap automático: `qtd × n_formatos ≤ 400`
-- **Depth Stockfish** — default **15** (recomendado); hint dinâmico exibe ±incerteza por depth (±1.5 em d10, ±0.5 em d15, ±0.2 em d18+)
+- **Tipo de análise** — **rápida (30 partidas)** [direcional: ACPL ±14cp, win-rate ±18%] ou **completa (100 partidas)** [produção: ACPL ±8cp, win-rate ±10%, trend lines confiáveis]. Sempre por recência; todos os formatos incluídos.
 - **Engine** — Stockfish local WASM (Hash 256MB) ou API remota stockfish.online
-- **Formatos** — bullet/blitz/rapid/daily
 
 ### 3. Coleta — botão "Buscar Partidas"
 
@@ -63,12 +61,13 @@ Browser → api.chess.com → ECO classifier → POST /api/games → SQLite
 ```
 
 - Lista archives chess.com do user
-- Itera meses do mais recente ao antigo, filtra por formato + n_plies ≥ 15
-- Quotas independentes por formato (50 blitz **+** 50 rapid, não misturado)
+- Itera meses do mais recente ao antigo, filtra por n_plies ≥ 15, para por recência ao atingir N partidas (30 ou 100)
 - Classifica abertura via base ECO Lichess (3.690 posições, varredura até 25 plies)
 - **Persiste** cada partida em `games` (UPSERT idempotente por URL chess.com — re-coletar nunca duplica)
 
 ### 4. Análise — botão "⚙ Analisar Stockfish"
+
+Clicar em "⚙ Analisar Stockfish" enfileira o job no painel **FILA DE ANÁLISE** (metade inferior direita da tela). Múltiplos jogadores podem entrar na fila sem interromper a análise em curso; cada item exibe progresso em tempo real com botões de pausa e stop. Pausa salva o ponto de retomada; stop preserva tudo já persistido no DB.
 
 **Pré-flight**:
 - Estima tempo total; se >30 min pede confirmação modal
@@ -300,6 +299,19 @@ Excluído do universo analítico (mas mantido em win-rate histórico):
 ### Confiabilidade da amostra (`confidence_pct`)
 
 `50%` × tamanho da amostra (satura em 50 partidas) + `30%` × profundidade do motor (satura em d18) + `20%` × cobertura ECO.
+
+### Confiança tática (`tactical_confidence`)
+
+Metadado separado do `confidence_pct`, focado na qualidade da análise de **temas táticos**:
+
+| Nível | Critério |
+|---|---|
+| `alta` | ≥ 15 partidas rapid+blitz |
+| `média` | 8–14 rapid+blitz |
+| `baixa` | < 8 rapid+blitz (bullet incluído com peso 0.4 como fallback) |
+| `insuficiente` | zero rapid/blitz/bullet — amostra dominada por daily |
+
+Daily sempre tem peso 0 (motor assistido). Bullet tem peso 0 quando rapid+blitz ≥ 15; sobe para 0.4 quando não há mínimo de partidas classificadas — evita amostra tática vazia. `compute.py` expõe `kpis.tactical_profile.tactical_confidence` com `{level, n_rapid_blitz, n_bullet_used, weights_adapted, note}`. As skills usam o nível para calibrar o tom das prescrições táticas no PDF.
 
 ### Lances paradigmáticos (Seção 7 do PDF)
 

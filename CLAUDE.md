@@ -200,6 +200,9 @@ Quando produto mudar, **atualizar essas docs no mesmo commit** que a mudança de
 | Redactor automático com prompt caching (~16k tokens cacheados)                | 2026-04-29 | `redactor.py` + `redactor_prompt.md` + flag `--auto-redact` em build.py |
 | Anti-cheat via outliers — 4 sinais com semáforo green/yellow/red              | 2026-04-29 | `compute_cheat_signals` em compute.py + macro `cheat_signals_block` |
 | Estado persistente do DB no boot + botão "Analisar pendentes sem refetch"     | 2026-04-29 | `refreshDbState` + `analyzePending` em index.html |
+| Parâmetros de coleta: sempre por recência, toggle rápida/completa (sem filtro de modalidade) | 2026-05-01 | 30 partidas = direcional; 100 = produção. `QUOTA_MODE` e `TIME_CLASSES` constantes. `fetchProfileTrend` removido. |
+| Confiança tática adaptativa: bullet peso 0.4 quando rapid+blitz < 15         | 2026-05-01 | `_MIN_RB_FOR_BULLET_ZERO = 15`; `tactical_confidence` em `kpis.tactical_profile`; SKILL.md das 3 perspectivas atualizados |
+| Fila de análise multi-jogador no UI (pausa/stop/resume com ponto salvo)       | 2026-05-01 | `jobQueue`, `runQueuedAnalysis(job)`, painel FILA DE ANÁLISE; `pauseFlag`/`stopFlag`/`resumeFromGame` |
 
 ### Em aberto (decidir num próximo ciclo)
 
@@ -306,4 +309,4 @@ Quando algo não está claro ou destoa de uma decisão prévia, eu pergunto ante
 - Quando um padrão técnico da seção 3 mudar.
 - Quando emergir uma lição da seção 7 que valha registrar.
 
-Última atualização: 2026-05-01 — analyze_worker 2-pass (movetime + FEN cache + threads fixo); taxonomia tática Lichess; tactical_profile completo (clock_tactics, trend_lines); detect_pin_family.
+Última atualização: 2026-05-01 — Simplificação params coleta (rápida/completa por recência); confiança tática adaptativa (bullet fallback, `tactical_confidence`); fila de análise multi-jogador (pausa/stop/resume).

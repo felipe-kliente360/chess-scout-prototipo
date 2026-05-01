@@ -102,10 +102,10 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 - Botão "⚙ Analisar pendentes (sem refetch)" que carrega games existentes via `/api/games`, filtra pelos formatos selecionados e dispara `analyzeGames()` reusando todo cache do DB.
 - `renderPreview` extraído como função reutilizável; `refreshDbState` chamado após fetch / analyze / reset.
 
-### Coleta — toggle de cota + detecção de tendência
+### Coleta — toggle de cota + detecção de tendência *(substituído em 2026-05-01)*
 
-- **Modo de cota** (`QUOTA_MODE`): radio "por estilo" (atual: TARGET × N formatos) vs "total (recência)" (TARGET partidas mais recentes do conjunto). Resolve fricção de quem joga 80% rapid e antes era forçado a buscar bullet só pra cumprir cota.
-- **Pré-get de tendência** (`fetchProfileTrend`): puxa últimos 60 dias do perfil chess.com, peso `exp(-days/30)` (meia-vida 30d), agrega por `time_class`. UI mostra distribuição ponderada + delta primeiros 30d vs últimos 30d (ex: "rapid 78%, blitz 18% · rapid ↑12pp"). Botão dedicado para evitar fetch automático.
+- **Modo de cota** (`QUOTA_MODE`): radio "por estilo" vs "total (recência)". *(Substituído: opção única "total por recência" — ver "Simplificação de parâmetros" abaixo.)*
+- **Pré-get de tendência** (`fetchProfileTrend`): puxava últimos 60 dias do perfil chess.com. *(Removido por complexidade sem retorno proporcional.)*
 
 ### Telemetria de execução (recalibração da estimativa)
 
@@ -125,6 +125,37 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 - 55 testes pytest (helpers de score, expected_acpl, depth_factor, classify_loss, phase_of_ply, history, position_cache).
 - README reescrito com pipeline atual, arquitetura, conceitos centrais.
 - 4 commits temáticos publicados em GitHub: `efb3e1a` (tactical), `1c9662c` (servidor), `2495e7c` (position_facts), `588735b` (consolidação SQLite + 3 camadas + scores + paradigmáticas), seguidos de fixes (`04609c5`, `8d8cb94`, `0ef1193`, `824d881`, `3efb4c6`, `1581037`).
+
+---
+
+---
+
+## ✅ Entregue (2026-05-01)
+
+### Simplificação de parâmetros de coleta
+
+- Removidos: seletor de quantidade, radios de cota e checkboxes de modalidade.
+- Substituído por toggle binário **rápida (30 partidas)** / **completa (100 partidas)**. Quantidades derivadas de significância estatística: 30 → ACPL ±14cp, win-rate ±18%, táticas + relógio direcionais; 100 → ACPL ±8cp, win-rate ±10%, ranking tático confiável, trend lines funcionais.
+- Coleta sempre por recência, todos os formatos (bullet/blitz/rapid/daily), sem filtro de modalidade.
+- `QUOTA_MODE = "total"` e `TIME_CLASSES = all` agora constantes não configuráveis. `fetchProfileTrend` removido.
+
+### Confiança tática adaptativa (peso bullet por fallback)
+
+- `_MIN_RB_FOR_BULLET_ZERO = 15`: se rapid+blitz ≥ 15, bullet tem peso 0.0 (comportamento original). Se rapid+blitz < 15, bullet recebe peso 0.4 como fallback para evitar amostra tática vazia.
+- Daily sempre peso 0.0 (motor assistido — sem exceção).
+- `tactical_confidence` adicionado ao payload de `compute.py`: `{level: "alta"|"média"|"baixa"|"insuficiente", n_rapid_blitz, n_bullet_used, weights_adapted, note}`. Nível função de n_rapid_blitz; se `weights_adapted=true`, note sinaliza dependência de bullet.
+- UI exibe badge de cobertura tática após coleta (`logTacticalCoverage`).
+- SKILL.md de todas as perspectivas atualizados com regras de exibição por nível (se `level ≠ "alta"` → nota obrigatória antes da narrativa tática; se `"insuficiente"` → pula temas).
+
+### Fila de análise multi-jogador
+
+- Painel **FILA DE ANÁLISE** na metade inferior do painel direito (flex-column: `#log` flex:1 + `#queue-panel` 220px fixo).
+- Cada item mostra status colorido + `X/N posições (%)` em tempo real + barra de progresso + botões ⏸ pausa / ■ stop.
+- Pausa salva `resumeFromGame` e passa execução para o próximo da fila; retoma exatamente do ponto salvo.
+- Stop marca job como parado e preserva tudo já persistido no DB.
+- Novo jogador entra no final da fila sem interromper análise em curso.
+- `analyzeGames()` virou thin wrapper (`addToQueue()` → `processQueue()`); corpo real migrou para `runQueuedAnalysis(job)` que usa `job.games` (snapshot) e `job.username` — independente de globais.
+- Flags `pauseFlag` e `stopFlag` verificadas a cada iteração de partida e posição — saída limpa sem terminação forçada.
 
 ---
 
