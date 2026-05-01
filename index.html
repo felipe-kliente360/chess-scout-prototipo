@@ -113,13 +113,6 @@
       outline: none;
     }
     .config input:focus, .config select:focus { border-color: #f0c040; }
-    .time-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; padding: 4px 0; }
-    .time-filters .tf {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 12px; color: #b0a888; text-transform: none;
-      letter-spacing: 0; padding: 0; cursor: pointer; user-select: none;
-    }
-    .time-filters .tf input { accent-color: #f0c040; cursor: pointer; }
     #estimate {
       padding: 12px 16px;
       border-bottom: 1px solid #222;
@@ -194,19 +187,16 @@
         <input type="text" id="input-username" value="miguelrov" />
       </label>
       <label>
-        Qtd. partidas <span id="target-hint" style="color:#888;font-size:0.85em">(por formato)</span>
-        <input type="number" id="input-target" value="50" min="1" max="500" />
-      </label>
-      <label>
-        Modo de cota
-        <div class="quota-mode" style="display:flex;gap:14px;font-size:0.9em;padding:4px 0">
+        Análise
+        <div style="display:flex;gap:14px;font-size:0.9em;padding:4px 0">
           <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
-            <input type="radio" name="quota-mode" value="per-style" checked> por estilo
+            <input type="radio" name="analysis-mode" value="quick" checked> rápida (30 partidas)
           </label>
           <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
-            <input type="radio" name="quota-mode" value="total"> total (recência)
+            <input type="radio" name="analysis-mode" value="full"> completa (100 partidas)
           </label>
         </div>
+        <span style="color:#555;font-size:0.8em">por recência · todos os formatos</span>
       </label>
       <label>
         Engine
@@ -214,19 +204,6 @@
           <option value="api">API remota (stockfish.online)</option>
           <option value="local" selected>Stockfish local (WASM)</option>
         </select>
-      </label>
-      <label>
-        Formatos
-        <div class="time-filters">
-          <label class="tf"><input type="checkbox" class="tf-cb" value="bullet" checked> bullet</label>
-          <label class="tf"><input type="checkbox" class="tf-cb" value="blitz" checked> blitz</label>
-          <label class="tf"><input type="checkbox" class="tf-cb" value="rapid" checked> rapid</label>
-          <label class="tf"><input type="checkbox" class="tf-cb" value="daily" checked> daily</label>
-        </div>
-        <div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <button id="btn-trend" type="button" onclick="fetchProfileTrend()" style="font-size:0.8em;padding:3px 8px">🔍 Detectar tendência (60d)</button>
-          <span id="trend-hint" style="color:#888;font-size:0.85em">— clique para ver distribuição recente</span>
-        </div>
       </label>
     </div>
 
@@ -292,15 +269,13 @@
     "https://unpkg.com/stockfish.js@10.0.2/stockfish.js",
   ];
   let USERNAME = "miguelrov";
-  let TARGET = 50;
+  let TARGET = 30;
   // Threshold interno para "já analisado" — worker 2-pass atinge depth 16-20
   // com movetime 1s; qualquer posição com depth >= 14 é considerada OK.
   const STOCKFISH_DEPTH = 14;
   let ENGINE = "local";
-  let TIME_CLASSES = new Set(["bullet", "blitz", "rapid", "daily"]);
-  // QUOTA_MODE: "per-style" = TARGET por formato (atual); "total" = TARGET partidas
-  // mais recentes do conjunto de formatos selecionados (qualquer mix).
-  let QUOTA_MODE = "per-style";
+  const TIME_CLASSES = new Set(["bullet", "blitz", "rapid", "daily"]);
+  const QUOTA_MODE = "total";
   let allGames = [];
   let allAnalysis = [];
 
@@ -442,11 +417,8 @@
     try {
       const games = await api(`/api/games?username=${encodeURIComponent(USERNAME)}`);
       if (!games?.length) { log("⚠ Nenhuma partida no DB para esse user.", "log-warn"); return; }
-      // Filtra pelos formatos selecionados.
-      const filtered = games.filter(g => TIME_CLASSES.has(g.time_class));
-      if (!filtered.length) { log(`⚠ Nenhuma partida nos formatos selecionados (${[...TIME_CLASSES].join("+")}).`, "log-warn"); return; }
-      allGames = filtered;
-      log(`  ✓ ${allGames.length} partidas carregadas do DB (${games.length - allGames.length} fora dos formatos selecionados).`);
+      allGames = games;
+      log(`  ✓ ${allGames.length} partidas carregadas do DB.`);
       const ecoHits = applyOpeningClassification(allGames);
       log(`📚 Aberturas reclassificadas via ECO: ${ecoHits}/${allGames.length}.`);
       await loadPositionCache();
@@ -461,111 +433,16 @@
     }
   }
 
-  // Pré-get de tendência: pega últimos 60 dias do perfil chess.com,
-  // pondera por recência (exp(-days/30) — meia-vida 30d) para enxergar
-  // tendência atual do estilo de jogo. Mostra a distribuição na UI
-  // como dica para o usuário escolher os formatos certos antes da análise.
-  async function fetchProfileTrend() {
-    const u = (document.getElementById("input-username").value || "").trim();
-    const hint = document.getElementById("trend-hint");
-    const btn = document.getElementById("btn-trend");
-    if (!u) { hint.textContent = "— informe o username primeiro"; return; }
-    btn.disabled = true; btn.textContent = "buscando...";
-    hint.textContent = "buscando últimos 60 dias...";
-    try {
-      const archRes = await fetch(`https://api.chess.com/pub/player/${u}/games/archives`);
-      if (!archRes.ok) throw new Error(`status ${archRes.status}`);
-      const { archives } = await archRes.json();
-      if (!archives?.length) throw new Error("sem arquivos");
-      // Pega os 3 arquivos mais recentes (cobre ~90 dias com folga; filtra <60d).
-      const tail = archives.slice(-3);
-      const cutoffMs = Date.now() - 60 * 86400_000;
-      const halfMs = Date.now() - 30 * 86400_000;
-      const tau_days = 30;
-      const weighted = {};   // {time_class: peso acumulado}
-      const recent = {};     // últimos 30d (raw count)
-      const older = {};      // 30-60d (raw count)
-      let totalGames = 0, totalRecent = 0, totalOlder = 0;
-      for (const url of tail) {
-        const r = await fetch(url);
-        if (!r.ok) continue;
-        const { games } = await r.json();
-        if (!games?.length) continue;
-        for (const g of games) {
-          const endMs = (g.end_time || 0) * 1000;
-          if (!endMs || endMs < cutoffMs) continue;
-          const tc = g.time_class || "rapid";
-          const daysAgo = (Date.now() - endMs) / 86400_000;
-          const w = Math.exp(-daysAgo / tau_days);
-          weighted[tc] = (weighted[tc] || 0) + w;
-          if (endMs >= halfMs) {
-            recent[tc] = (recent[tc] || 0) + 1;
-            totalRecent++;
-          } else {
-            older[tc] = (older[tc] || 0) + 1;
-            totalOlder++;
-          }
-          totalGames++;
-        }
-      }
-      if (!totalGames) {
-        hint.textContent = "— sem partidas nos últimos 60 dias";
-        return;
-      }
-      const totalWeight = Object.values(weighted).reduce((a, b) => a + b, 0) || 1;
-      const distribuicao = Object.entries(weighted)
-        .map(([tc, w]) => ({ tc, pct: Math.round(100 * w / totalWeight) }))
-        .sort((a, b) => b.pct - a.pct)
-        .filter(e => e.pct > 0);
-      // Detecta tendência: top class subiu/caiu entre os 30d antigos e os 30d novos?
-      const top = distribuicao[0]?.tc;
-      let trendNote = "";
-      if (top && totalRecent > 0 && totalOlder > 0) {
-        const recentPct = Math.round(100 * (recent[top] || 0) / totalRecent);
-        const olderPct = Math.round(100 * (older[top] || 0) / totalOlder);
-        const delta = recentPct - olderPct;
-        if (Math.abs(delta) >= 10) {
-          trendNote = ` · ${top} ${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}pp (${olderPct}%→${recentPct}%)`;
-        }
-      }
-      const dist = distribuicao.map(e => `${e.tc} ${e.pct}%`).join(" · ");
-      hint.textContent = `60d ponderado: ${dist} (${totalGames} partidas)${trendNote}`;
-      hint.style.color = "#5a8";
-      // Auto-marca os formatos que aparecem (apenas se usuário não desmarcou).
-      // Não altera escolha existente — só sugere via cor; deixa decisão ao user.
-    } catch (e) {
-      hint.textContent = `— falha (${e.message})`;
-      hint.style.color = "#c66";
-    } finally {
-      btn.disabled = false; btn.textContent = "🔍 Detectar tendência (60d)";
-    }
-  }
-
   function readConfig() {
     const u = document.getElementById("input-username").value.trim();
-    const t = parseInt(document.getElementById("input-target").value, 10);
     const eng = document.getElementById("input-engine").value;
-    const selectedTC = Array.from(document.querySelectorAll(".tf-cb:checked")).map(cb => cb.value);
-    const quotaMode = document.querySelector('input[name="quota-mode"]:checked')?.value || "per-style";
+    const mode = document.querySelector('input[name="analysis-mode"]:checked')?.value || "quick";
     if (!u) throw new Error("Username vazio.");
-    if (!t || t < 1) throw new Error("Quantidade inválida.");
-    if (!selectedTC.length) throw new Error("Selecione pelo menos um formato (bullet, blitz, rapid ou daily).");
-    // Cap total: depende do modo. per-style: TARGET × N formatos. total: TARGET.
-    const totalGames = quotaMode === "total" ? t : t * selectedTC.length;
-    if (totalGames > 400) {
-      const detail = quotaMode === "total" ? `${t} no total` : `${t} × ${selectedTC.length} formatos = ${totalGames}`;
-      throw new Error(`${detail} partidas excede o limite de 400. Reduza qtd ou formatos.`);
-    }
     USERNAME = u;
-    TARGET = t;
+    TARGET = mode === "full" ? 100 : 30;
     ENGINE = eng === "local" ? "local" : "api";
-    TIME_CLASSES = new Set(selectedTC);
-    QUOTA_MODE = quotaMode;
-    const subtitleQuota = quotaMode === "total" ? `${t} total` : `${t}/formato`;
-    document.getElementById("subtitle").textContent = `${USERNAME} · ${subtitleQuota} · 2-pass 1s+2s · ${selectedTC.join("+")} · ${ENGINE}`;
-    // Atualiza dica do campo qtd. partidas conforme o modo
-    const targetHint = document.getElementById("target-hint");
-    if (targetHint) targetHint.textContent = quotaMode === "total" ? "(total)" : "(por formato)";
+    const modeLabel = mode === "full" ? "100 partidas (completa)" : "30 partidas (rápida)";
+    document.getElementById("subtitle").textContent = `${USERNAME} · ${modeLabel} · 2-pass 1s+2s · ${ENGINE}`;
   }
 
   // Calibração observada (preenchida sob demanda via /api/execution-logs/calibration).
@@ -619,10 +496,7 @@
     if (allGames.length) {
       return allGames.reduce((acc, g) => acc + countPlies(g.pgn), 0);
     }
-    const nClasses = TIME_CLASSES.size || 1;
-    // per-style: TARGET por formato × N formatos × ~80 plies. total: TARGET × ~80 plies.
-    const expectedGames = QUOTA_MODE === "total" ? TARGET : TARGET * nClasses;
-    return expectedGames * 80;
+    return TARGET * 80;
   }
 
   function expectedCacheHitRate() {
@@ -649,12 +523,9 @@
     const h = Math.floor(m / 60), rm = m % 60;
     return rm ? `${h}h ${rm}m` : `${h}h`;
   }
-  // Faixa de incerteza do Score conforme depth (alinhada com .claude/skills/_chess_shared/compute.py:score_uncertainty_band)
   function updateEstimate() {
-    const t = parseInt(document.getElementById("input-target").value, 10);
     const eng = document.getElementById("input-engine").value;
     const el = document.getElementById("estimate");
-    if (!t || t < 1) { el.textContent = "⏱ tempo estimado: —"; return; }
     const positions = expectedTotalPositions();
     const hitRate = expectedCacheHitRate();
     const positionsToAnalyze = Math.round(positions * (1 - hitRate));
@@ -666,13 +537,9 @@
     const avgPlies = avgPliesFromGames();
     const engLabel = eng === "local" ? "Stockfish local (WASM)" : "backend nativo 2-pass";
     const cacheNote = hitRate > 0 ? ` · cache ~${Math.round(hitRate * 100)}%` : "";
-    const expectedGames = QUOTA_MODE === "total" ? TARGET : TARGET * TIME_CLASSES.size;
-    const basisFormula = QUOTA_MODE === "total"
-      ? `${TARGET} total (recência) em ${TIME_CLASSES.size} formato${TIME_CLASSES.size > 1 ? "s" : ""}`
-      : `${TARGET}/formato × ${TIME_CLASSES.size} = ~${expectedGames} partidas`;
     const basis = allGames.length
       ? `${allGames.length} partidas (${avgPlies} lances/partida em média, ${positions} posições${cacheNote})`
-      : `${basisFormula}, ~${positions} posições`;
+      : `~${TARGET} partidas, ~${positions} posições`;
     el.textContent = `⏱ ${engLabel} (${basis}): ${lo} – ${hi}`;
   }
   function renderModeBadge() {
@@ -686,12 +553,8 @@
   }
   document.addEventListener("DOMContentLoaded", () => {
     renderModeBadge();
-    ["input-target", "input-engine"].forEach(id =>
-      document.getElementById(id).addEventListener("input", () => { try { readConfig(); } catch (_) {} updateEstimate(); }));
     document.getElementById("input-engine").addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); });
-    document.querySelectorAll(".tf-cb").forEach(cb =>
-      cb.addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); }));
-    document.querySelectorAll('input[name="quota-mode"]').forEach(r =>
+    document.querySelectorAll('input[name="analysis-mode"]').forEach(r =>
       r.addEventListener("change", () => { try { readConfig(); } catch (_) {} updateEstimate(); }));
     // Username muda → recalcula estado do DB.
     let dbStateDebounce;
@@ -792,8 +655,7 @@
     document.getElementById("preview").style.display = "none";
     allGames = [];
     log("─".repeat(40), "log-idle");
-    const quotaLabel = QUOTA_MODE === "total" ? `${TARGET} total` : `${TARGET}/formato`;
-    log(`▶ Nova busca: ${USERNAME} · ${quotaLabel} (${[...TIME_CLASSES].join("+")}) · 2-pass 1s+2s`);
+    log(`▶ Nova busca: ${USERNAME} · ${TARGET} partidas por recência · 2-pass 1s+2s`);
 
     try {
       log("Carregando base ECO (Lichess)...");
@@ -812,23 +674,13 @@
 
       log(`${archives.length} meses encontrados. Coletando partidas...`);
 
-      // Contadores: per-style = um por formato; total = um único global.
-      const counters = {};
-      TIME_CLASSES.forEach(tc => counters[tc] = 0);
       let totalCount = 0;
-      const isQuotaMet = QUOTA_MODE === "total"
-        ? () => totalCount >= TARGET
-        : () => [...TIME_CLASSES].every(tc => counters[tc] >= TARGET);
-      const fmtCounters = QUOTA_MODE === "total"
-        ? () => `total:${totalCount}/${TARGET} (${[...TIME_CLASSES].map(tc => `${tc}:${counters[tc]}`).join(" ")})`
-        : () => [...TIME_CLASSES].map(tc => `${tc}:${counters[tc]}/${TARGET}`).join(" ");
-
       const collected = [];
       for (let i = archives.length - 1; i >= 0; i--) {
-        if (isQuotaMet()) break;
+        if (totalCount >= TARGET) break;
         const url = archives[i];
         const month = url.split("/").slice(-2).join("/");
-        log(`Lendo ${month}... (${fmtCounters()})`);
+        log(`Lendo ${month}... (${totalCount}/${TARGET})`);
         showCursor();
 
         const res = await fetch(url, {
@@ -838,30 +690,18 @@
         const { games } = await res.json();
         if (!games?.length) continue;
         const parsed = parseGames(games);
-        let added = 0, skippedTime = 0, skippedShort = 0, skippedFull = 0;
+        let added = 0, skippedShort = 0;
         // Itera newest→oldest dentro do mês (Chess.com retorna oldest-first)
         for (let j = parsed.length - 1; j >= 0; j--) {
+          if (totalCount >= TARGET) break;
           const g = parsed[j];
-          const tc = g.time_class;
-          if (!TIME_CLASSES.has(tc)) { skippedTime++; continue; }
-          if (QUOTA_MODE === "total") {
-            if (totalCount >= TARGET) { skippedFull++; continue; }
-          } else {
-            if (counters[tc] >= TARGET) { skippedFull++; continue; }
-          }
           if (countPlies(g.pgn) < MIN_PLIES) { skippedShort++; continue; }
           collected.push(g);
-          counters[tc]++;
           totalCount++;
           added++;
-          if (QUOTA_MODE === "total" && totalCount >= TARGET) break;
         }
-        const notes = [
-          skippedTime ? `${skippedTime} ritmo` : "",
-          skippedShort ? `${skippedShort} <${MIN_PLIES} lances` : "",
-          skippedFull ? `${skippedFull} cota cheia` : "",
-        ].filter(Boolean).join(", ");
-        log(`  ✓ ${added} adicionadas${notes ? ` (descartadas: ${notes})` : ""} · ${fmtCounters()}`);
+        const notes = skippedShort ? `${skippedShort} <${MIN_PLIES} lances descartadas` : "";
+        log(`  ✓ ${added} adicionadas${notes ? ` (${notes})` : ""} · total: ${totalCount}/${TARGET}`);
       }
       // Coletado newest-first; inverte para chronological (oldest-first)
       collected.reverse();
