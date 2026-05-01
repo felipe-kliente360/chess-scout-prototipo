@@ -55,14 +55,32 @@
       letter-spacing: 1px;
     }
     #log {
-      flex: 1;
-      min-height: 540px;
-      max-height: calc(100vh - 200px);
+      flex: 1 1 0;
+      min-height: 180px;
+      max-height: calc(50vh - 60px);
       overflow-y: auto;
       padding: 16px;
       font-size: 13px;
       line-height: 1.7;
     }
+    #queue-panel {
+      flex: 0 0 220px;
+      overflow-y: auto;
+      padding: 6px 14px 10px;
+      background: #0c0c0c;
+      border-top: 1px solid #222;
+    }
+    .queue-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 0; border-bottom: 1px solid #1a1a1a; font-size: 11px;
+    }
+    .qi-btn {
+      background: transparent; border: 1px solid #2a2a2a !important;
+      color: #777; font-size: 10px; padding: 2px 7px; letter-spacing: 0;
+      text-transform: none; font-weight: 400; border-radius: 2px;
+      transition: border-color 0.15s;
+    }
+    .qi-btn:hover { border-color: #555 !important; color: #aaa; }
     .log-idle { color: #444; }
     .log-ok { color: #6fcf6f; }
     .log-warn { color: #e0a030; }
@@ -241,6 +259,10 @@
   <div class="panel right">
     <div class="terminal-label">TERMINAL OUTPUT</div>
     <div id="log"><span class="log-idle">Aguardando início...</span></div>
+    <div class="terminal-label" style="border-top:1px solid #222">FILA DE ANÁLISE</div>
+    <div id="queue-panel">
+      <div id="queue-list"><span style="color:#333;font-size:11px">Nenhuma análise na fila.</span></div>
+    </div>
   </div>
 </div>
 
@@ -631,6 +653,115 @@
     }
     return hits;
   }
+
+  // ── Fila de análise ───────────────────────────────────────────────
+  const jobQueue = [];
+  let jobIdCounter = 0;
+  let activeJobId = null;
+
+  function createJob(username, games) {
+    return {
+      id: ++jobIdCounter,
+      username,
+      games: [...games],
+      status: "pending",       // pending | running | paused | done | stopped
+      progress: { analyzed: 0, total: 0 },
+      resumeFromGame: 0,
+      pauseFlag: false,
+      stopFlag: false,
+    };
+  }
+
+  const _STATUS_LABEL = { pending: "aguardando", running: "executando", paused: "pausado", done: "concluído", stopped: "parado" };
+  const _STATUS_COLOR = { pending: "#666", running: "#f0c040", paused: "#4fc3f7", done: "#6fcf6f", stopped: "#e05555" };
+
+  function renderQueue() {
+    const el = document.getElementById("queue-list");
+    if (!el) return;
+    const visible = jobQueue.filter(j => j.status !== "stopped" || j.progress.analyzed > 0);
+    if (!visible.length) {
+      el.innerHTML = '<span style="color:#333;font-size:11px">Nenhuma análise na fila.</span>';
+      return;
+    }
+    el.innerHTML = visible.map(job => {
+      const { id, username, status, progress } = job;
+      const pct = progress.total ? Math.round(100 * progress.analyzed / progress.total) : 0;
+      const bar = progress.total
+        ? `<div style="width:80px;height:4px;background:#1a1a1a;border-radius:2px;display:inline-block;vertical-align:middle">
+             <div style="width:${pct}%;height:100%;background:${_STATUS_COLOR[status] || '#555'};border-radius:2px;transition:width .3s"></div>
+           </div>`
+        : `<div style="width:80px;height:4px;background:#1a1a1a;border-radius:2px;display:inline-block;vertical-align:middle"></div>`;
+      const prog = progress.total
+        ? `${progress.analyzed.toLocaleString()}/${progress.total.toLocaleString()} (${pct}%)`
+        : "—";
+      const pauseBtn  = status === "running"
+        ? `<button class="qi-btn" onclick="pauseJob(${id})" title="Pausar">⏸</button>` : "";
+      const resumeBtn = status === "paused"
+        ? `<button class="qi-btn" onclick="resumeJob(${id})" title="Retomar agora">▶</button>` : "";
+      const stopBtn   = (status === "running" || status === "pending" || status === "paused")
+        ? `<button class="qi-btn" onclick="stopJob(${id})" title="Parar" style="color:#c55">■</button>` : "";
+      return `<div class="queue-item">
+        <span style="color:${_STATUS_COLOR[status]};min-width:76px">[${_STATUS_LABEL[status] || status}]</span>
+        <span style="flex:1;color:#b0a888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${username}</span>
+        <span style="color:#666;min-width:130px;text-align:right">${prog}</span>
+        ${bar}
+        ${pauseBtn}${resumeBtn}${stopBtn}
+      </div>`;
+    }).join("");
+  }
+
+  function pauseJob(id) {
+    const job = jobQueue.find(j => j.id === id);
+    if (job && job.status === "running") job.pauseFlag = true;
+  }
+
+  function resumeJob(id) {
+    const job = jobQueue.find(j => j.id === id);
+    if (!job || job.status !== "paused") return;
+    job.status = "pending";
+    job.pauseFlag = false;
+    processQueue();
+  }
+
+  function stopJob(id) {
+    const job = jobQueue.find(j => j.id === id);
+    if (!job) return;
+    if (job.status === "running") {
+      job.stopFlag = true;
+    } else {
+      job.status = "stopped";
+      renderQueue();
+    }
+  }
+
+  async function processQueue() {
+    if (activeJobId !== null) return;
+    const next = jobQueue.find(j => j.status === "pending");
+    if (!next) return;
+    activeJobId = next.id;
+    next.status = "running";
+    next.pauseFlag = false;
+    next.stopFlag = false;
+    renderQueue();
+    await runQueuedAnalysis(next);
+    if (next.status === "running") next.status = "done";
+    activeJobId = null;
+    renderQueue();
+    setTimeout(processQueue, 800);
+  }
+
+  function addToQueue() {
+    if (!SERVER_MODE) { alert("Servidor desligado. Rode bash scripts/start.sh."); return; }
+    if (!allGames.length) { log("⚠ Busque partidas antes de analisar.", "log-warn"); return; }
+    try { readConfig(); } catch (e) { alert(e.message); return; }
+    const job = createJob(USERNAME, allGames);
+    jobQueue.push(job);
+    const pos = jobQueue.filter(j => j.status === "pending").length;
+    log(`📋 ${USERNAME} (${allGames.length} partidas) adicionado à fila — posição #${pos}.`);
+    renderQueue();
+    processQueue();
+  }
+  // ── Fim da fila ───────────────────────────────────────────────────
 
   function logTacticalCoverage(games) {
     const rb = games.filter(g => g.time_class === "rapid" || g.time_class === "blitz").length;
@@ -1201,201 +1332,167 @@
     }
   }
 
-  async function analyzeGames() {
-    if (!SERVER_MODE) {
-      alert("Servidor desligado. Abra um terminal e rode `bash scripts/start.sh` (ou `/app-start`).");
-      return;
-    }
+  // Delega para a fila — o corpo real é runQueuedAnalysis(job).
+  async function analyzeGames() { addToQueue(); }
+
+  async function runQueuedAnalysis(job) {
     if (typeof Chess === "undefined") { log("❌ chess.js não carregou.", "log-err"); return; }
-    if (!allGames.length) { log("⚠ Nenhuma partida para analisar.", "log-warn"); return; }
-    try { readConfig(); } catch (e) { alert(e.message); return; }
 
-    // Warning quando estimativa > 30 min — evita "rodei 5h sem perceber".
-    // Usa o estimador já existente (estimateSecondsPerPosition + cache hit).
-    const totalPos = expectedTotalPositions();
-    const hitRate = expectedCacheHitRate();
-    const estSec = totalPos * (1 - hitRate) * estimateSecondsPerPosition(ENGINE);
-    if (estSec > 1800) {
-      const minStr = Math.round(estSec / 60);
-      const ok = confirm(`⏱ Estimativa: ~${minStr} min (${allGames.length} partidas, análise 2-pass). Continuar?`);
-      if (!ok) { log("⚠ Análise cancelada pelo usuário.", "log-warn"); return; }
+    const jobGames = job.games;
+    const jobUser  = job.username;
+
+    // Estimativa de tempo só na primeira execução (não resume)
+    if (job.resumeFromGame === 0) {
+      const totalPos = jobGames.reduce((a, g) => a + countPlies(g.pgn), 0);
+      const hitRate  = expectedCacheHitRate();
+      const estSec   = totalPos * (1 - hitRate) * estimateSecondsPerPosition(ENGINE);
+      if (estSec > 1800) {
+        const ok = confirm(`⏱ Estimativa: ~${Math.round(estSec / 60)} min (${jobGames.length} partidas). Continuar?`);
+        if (!ok) { job.status = "stopped"; return; }
+      }
     }
 
-    const btn = document.getElementById("btn-analyze");
-    const fetchBtn = document.getElementById("btn-fetch");
-    btn.disabled = true; fetchBtn.disabled = true;
-    btn.textContent = "Analisando...";
     allAnalysis = [];
+    let analyzedPositions = job.progress.analyzed;
+    let apiErrors = 0, dbHits = 0;
+    if (job.resumeFromGame === 0) {
+      apiDiagnostics = { calls: [], ok: 0, failed: 0, byKind: {}, latencies: [], startedAt: Date.now() };
+      cacheStats = { hits: 0, misses: 0 };
+    }
 
-    let analyzedPositions = 0;
-    let apiErrors = 0;
-    let dbHits = 0;
-    apiDiagnostics = { calls: [], ok: 0, failed: 0, byKind: {}, latencies: [], startedAt: Date.now() };
-
-    // Telemetria de execução: registra início no DB para recalibrar o estimador.
     let execLogId = null;
     const execStartedAt = Date.now();
-    if (SERVER_MODE) {
+    if (SERVER_MODE && job.resumeFromGame === 0) {
       try {
         const r = await api("/api/execution-logs/start", {
-          username: USERNAME, depth: STOCKFISH_DEPTH, engine: ENGINE,
-          n_games: allGames.length,
-          n_positions_total: totalPos,
-          expected_seconds_at_start: estSec,
+          username: jobUser, depth: STOCKFISH_DEPTH, engine: ENGINE,
+          n_games: jobGames.length,
+          n_positions_total: job.progress.total || jobGames.reduce((a, g) => a + countPlies(g.pgn), 0),
+          expected_seconds_at_start: 0,
         });
         execLogId = r && r.id;
-      } catch (_) { /* telemetria não bloqueia análise */ }
+      } catch (_) {}
     }
 
     try {
-      log(`▶ Iniciando análise Stockfish [${ENGINE === "local" ? "local WASM" : "API remota"}, depth=${STOCKFISH_DEPTH}] em ${allGames.length} partidas...`, "log-normal");
-      cacheStats = { hits: 0, misses: 0 };
-      log("Carregando cache de posições...");
+      const resuming = job.resumeFromGame > 0;
+      log(`▶ ${resuming ? "Retomando" : "Iniciando"} análise [${ENGINE === "local" ? "WASM" : "API"}, 2-pass] — ${jobUser} (${jobGames.length} partidas)`, "log-normal");
+
       await loadPositionCache();
-      log(`  ✓ ${Object.keys(positionCache).length} posições no cache local.`);
-      log("Carregando índice de temas táticos...");
-      const tacticalIdx = await TacticalThemes.loadTacticalIndex();
-      const nB = Object.keys(tacticalIdx.B || {}).length;
-      const nC = Object.keys(tacticalIdx.C || {}).length;
-      if (nB || nC) log(`  ✓ ${nB} padrões posicionais + ${nC} padrões de erro indexados.`);
-      if (ENGINE === "local") {
-        log("  ⏳ carregando engine WASM (primeira vez baixa ~600KB)...");
+      await TacticalThemes.loadTacticalIndex();
+      if (ENGINE === "local" && !resuming) {
+        log("  ⏳ carregando engine WASM...");
         await initStockfish();
         log("  ✅ engine pronto.", "log-ok");
       }
 
       let totalPositions = 0;
-      const gamesWithMoves = allGames.map((g, idx) => {
+      const gamesWithMoves = jobGames.map((g, idx) => {
         const moves = extractMovesFromPGN(g.pgn);
         if (moves) totalPositions += moves.length;
-        return { game: g, gameIndex: idx, moves };
+        return { game: g, idx, moves };
       });
+      job.progress.total = totalPositions;
+      if (totalPositions === 0) { log("❌ Nenhuma posição extraível. Abortando.", "log-err"); return; }
+      if (!resuming) log(`Total: ${totalPositions} posições`);
 
-      log(`Total de posições a analisar: ${totalPositions}`);
-      if (totalPositions === 0) {
-        log("❌ Nenhuma posição extraível dos PGNs. Abortando.", "log-err");
-        return;
-      }
-
-      // Server mode: pré-carrega análises das partidas da SESSÃO ATUAL via
-      // filter ?game_ids=... — payload proporcional ao subset analisado, não
-      // ao DB inteiro do user. Em sessão típica (50 jogos novos pra user com
-      // 200 no DB) cai em ~75%.
-      const existingByGame = {};   // {game_id: {ply: rowComplete}}
-      // dbHits é hoisted (declarado fora do try) para entrar na telemetria.
+      // Pré-carrega análises existentes do DB para este conjunto de partidas
+      const existingByGame = {};
       let pendingPostBuffer = [];
-      // Flush canônico = ao terminar cada partida (alinha unidade de persistência
-      // com unidade lógica). SAFETY_NET força flush em partidas anormalmente longas
-      // (>200 plies) pra limitar janela de perda em caso de crash.
       const POST_SAFETY_NET = 200;
       if (SERVER_MODE) {
         try {
-          const sessionGameIds = allGames
-            .map(g => g.url || `${USERNAME}_${g.date}_${g.opponent}`)
-            .filter(Boolean);
-          const idsParam = sessionGameIds.length
-            ? `&game_ids=${encodeURIComponent(sessionGameIds.join(","))}`
-            : "";
-          const rows = await api(`/api/analyses?username=${encodeURIComponent(USERNAME)}&min_depth=0${idsParam}`);
+          const ids = jobGames.map(g => g.url || `${jobUser}_${g.date}_${g.opponent}`).filter(Boolean);
+          const idsParam = ids.length ? `&game_ids=${encodeURIComponent(ids.join(","))}` : "";
+          const rows = await api(`/api/analyses?username=${encodeURIComponent(jobUser)}&min_depth=0${idsParam}`);
           for (const r of rows) {
             if (!existingByGame[r.game_id]) existingByGame[r.game_id] = {};
             existingByGame[r.game_id][r.ply] = r;
           }
           const reused = rows.filter(r => r.depth >= STOCKFISH_DEPTH).length;
-          log(`  ✓ ${rows.length} lances já analisados em history.db nas ${sessionGameIds.length} partidas da sessão; ${reused} reutilizáveis.`);
-        } catch (e) {
-          log(`  ⚠ Não foi possível ler análises pré-existentes (${e.message}).`, "log-warn");
-        }
+          if (!resuming) log(`  ✓ ${rows.length} lances em history.db; ${reused} reutilizáveis.`);
+        } catch (e) { log(`  ⚠ Pré-load falhou (${e.message}).`, "log-warn"); }
       }
       showCursor();
 
-      for (const { game, gameIndex, moves } of gamesWithMoves) {
+      for (let gi = job.resumeFromGame; gi < gamesWithMoves.length; gi++) {
+        // ── Verificar flags de controle ──────────────────────────────────
+        if (job.stopFlag) {
+          job.status = "stopped";
+          removeCursor();
+          log(`⏹ Análise interrompida — ${jobUser}. Progresso salvo no DB.`, "log-warn");
+          return;
+        }
+        if (job.pauseFlag) {
+          job.status = "paused";
+          job.resumeFromGame = gi;
+          removeCursor();
+          log(`⏸ Análise pausada — ${jobUser} (partida ${gi + 1}/${jobGames.length}). Próximo da fila continua.`, "log-warn");
+          return;
+        }
+
+        const { game, idx, moves } = gamesWithMoves[gi];
         if (!moves) {
           removeCursor();
-          log(`  ⚠ Partida ${gameIndex + 1}: PGN inválido, pulando.`, "log-warn");
+          log(`  ⚠ Partida ${gi + 1}: PGN inválido, pulando.`, "log-warn");
           showCursor();
           continue;
         }
         removeCursor();
-        log(`Partida ${gameIndex + 1}/${allGames.length} — ${game.opponent} (${moves.length} lances)`);
+        log(`Partida ${gi + 1}/${jobGames.length} — ${game.opponent} (${moves.length} lances)`);
         showCursor();
 
-        const gameId = game.url || `${USERNAME}_${game.date}_${game.opponent}`;
+        const gameId = game.url || `${jobUser}_${game.date}_${game.opponent}`;
         const cachedForGame = existingByGame[gameId] || {};
 
         for (const mv of moves) {
-          // Dedup em SQLite: se já analisado em depth >= alvo, reutiliza.
+          if (job.stopFlag || job.pauseFlag) break;
+
           const cachedRow = cachedForGame[mv.ply];
-          let analysis;
-          let cameFromDb = false;
+          let analysis, cameFromDb = false;
           if (cachedRow && cachedRow.depth >= STOCKFISH_DEPTH) {
-            analysis = {
-              evaluation: cachedRow.evaluation || "",
-              mate: cachedRow.mate || "",
-              best_move: cachedRow.best_move || "",
-              continuation: cachedRow.continuation || "",
-            };
-            cameFromDb = true;
-            dbHits++;
+            analysis = { evaluation: cachedRow.evaluation || "", mate: cachedRow.mate || "",
+                         best_move: cachedRow.best_move || "", continuation: cachedRow.continuation || "" };
+            cameFromDb = true; dbHits++;
           } else {
             analysis = await analyzeFEN(mv.fen_before);
             if (analysis.error) apiErrors++;
             if (ENGINE === "api" && ANALYZE_THROTTLE_MS) await new Promise(r => setTimeout(r, ANALYZE_THROTTLE_MS));
           }
           analyzedPositions++;
-          // Classificação de tema tático: usa best_move (Stockfish) sobre a posição
-          // antes do lance. Trade-off: rodar mesmo em posições de baixo loss_cp
-          // simplifica o pipeline; o relatório filtra por loss_cp depois.
+          job.progress.analyzed = analyzedPositions;
+
           let tactical = null;
           if (analysis.best_move) {
             try { tactical = TacticalThemes.classifyPosition(mv.fen_before, analysis.best_move, mv.move_uci); }
-            catch (_) { /* não bloquear análise se classificação falhar */ }
+            catch (_) {}
           }
-          const record = {
-            game_index: gameIndex + 1,
-            game_url: game.url,
-            date: game.date,
-            color: game.color,
-            opponent: game.opponent,
-            ply: mv.ply,
-            move_number: Math.ceil(mv.ply / 2),
-            side_to_move: mv.color,
-            move_san: mv.move_san,
-            move_uci: mv.move_uci,
-            fen_before: mv.fen_before,
-            depth: cameFromDb ? cachedRow.depth : STOCKFISH_DEPTH,
-            evaluation: analysis.evaluation,
-            mate: analysis.mate,
-            best_move: analysis.best_move,
+          allAnalysis.push({
+            game_index: gi + 1, game_url: game.url, date: game.date, color: game.color,
+            opponent: game.opponent, ply: mv.ply, move_number: Math.ceil(mv.ply / 2),
+            side_to_move: mv.color, move_san: mv.move_san, move_uci: mv.move_uci,
+            fen_before: mv.fen_before, depth: cameFromDb ? cachedRow.depth : STOCKFISH_DEPTH,
+            evaluation: analysis.evaluation, mate: analysis.mate, best_move: analysis.best_move,
             continuation: analysis.continuation || "",
             tactical_theme: tactical ? tactical.theme : "",
             tactical_confidence: tactical ? tactical.confidence : "",
             tactical_source: tactical ? tactical.source : "",
             tactical_themes: tactical ? JSON.stringify(tactical.themes) : "",
-          };
-          allAnalysis.push(record);
+          });
 
-          // Server mode: enfileira pra POST. Só envia se foi análise nova
-          // (evita re-postar o que já veio do DB).
           if (SERVER_MODE && !cameFromDb && analysis.best_move) {
             pendingPostBuffer.push({
-              game_id: gameId,
-              ply: mv.ply,
-              side_to_move: mv.color,
-              move_san: mv.move_san,
-              move_uci: mv.move_uci,
-              fen_before: mv.fen_before,
+              game_id: gameId, ply: mv.ply, side_to_move: mv.color,
+              move_san: mv.move_san, move_uci: mv.move_uci, fen_before: mv.fen_before,
               depth: STOCKFISH_DEPTH,
               evaluation: analysis.evaluation || null,
               mate: analysis.mate ? String(analysis.mate) : null,
-              best_move: analysis.best_move || null,
-              continuation: analysis.continuation || null,
+              best_move: analysis.best_move || null, continuation: analysis.continuation || null,
               tactical_theme: tactical ? tactical.theme : null,
               tactical_confidence: tactical ? tactical.confidence : null,
               tactical_source: tactical ? tactical.source : null,
               tactical_themes: tactical ? JSON.stringify(tactical.themes) : null,
             });
-            // Safety net: só dispara em partidas anormalmente longas
             if (pendingPostBuffer.length >= POST_SAFETY_NET) {
               try { await api("/api/analyses", { rows: pendingPostBuffer }); } catch (_) {}
               pendingPostBuffer = [];
@@ -1404,69 +1501,62 @@
 
           if (analyzedPositions % 10 === 0) {
             removeCursor();
-            log(`  … ${analyzedPositions}/${totalPositions} posições analisadas${apiErrors ? ` (${apiErrors} falhas API)` : ""}`);
+            const pct = Math.round(100 * analyzedPositions / totalPositions);
+            log(`  … ${analyzedPositions}/${totalPositions} posições (${pct}%)${apiErrors ? ` · ${apiErrors} falhas` : ""}`);
             showCursor();
+            renderQueue();
           }
         }
-        // Flush por partida: alinha unidade de persistência com unidade lógica.
-        // Reduz commits desnecessários e elimina batch que cruza partidas.
+
         if (SERVER_MODE && pendingPostBuffer.length) {
           try { await api("/api/analyses", { rows: pendingPostBuffer }); } catch (_) {}
           pendingPostBuffer = [];
         }
+        job.resumeFromGame = gi + 1;
+
+        // Checa flags após flush por partida
+        if (job.stopFlag) { job.status = "stopped"; removeCursor(); log(`⏹ Análise interrompida — ${jobUser}.`, "log-warn"); return; }
+        if (job.pauseFlag) { job.status = "paused"; removeCursor(); log(`⏸ Análise pausada — ${jobUser} após partida ${gi + 1}.`, "log-warn"); return; }
       }
 
       removeCursor();
-      // Flush final do buffer pendente
       if (SERVER_MODE && pendingPostBuffer.length) {
         try {
           const r = await api("/api/analyses", { rows: pendingPostBuffer });
-          log(`💾 ${r.saved} lances persistidos no servidor (último batch).`, "log-ok");
-        } catch (e) {
-          log(`⚠ Falha no flush final (${e.message}); ${pendingPostBuffer.length} lances ficaram em memória.`, "log-warn");
-        }
-        pendingPostBuffer = [];
+          log(`💾 ${r.saved} lances persistidos (último batch).`, "log-ok");
+        } catch (e) { log(`⚠ Flush final falhou (${e.message}).`, "log-warn"); }
       }
       const totalForRate = cacheStats.hits + cacheStats.misses;
-      const hitRate = totalForRate ? Math.round(100 * cacheStats.hits / totalForRate) : 0;
-      log(`✅ Análise concluída: ${analyzedPositions} posições${apiErrors ? ` (${apiErrors} com falha API)` : ""}.`, "log-ok");
-      if (SERVER_MODE && dbHits) {
-        log(`🗄  Reuso de history.db: ${dbHits} lances (${Math.round(100*dbHits/analyzedPositions)}%) puxados sem rodar Stockfish.`, "log-ok");
-      }
-      log(`📦 Cache de posições (JSON): ${cacheStats.hits} hits / ${cacheStats.misses} misses (${hitRate}% reaproveitado).`, "log-ok");
+      const hitRateFinal = totalForRate ? Math.round(100 * cacheStats.hits / totalForRate) : 0;
+      log(`✅ Análise concluída: ${analyzedPositions} posições${apiErrors ? ` (${apiErrors} falhas)` : ""}.`, "log-ok");
+      if (SERVER_MODE && dbHits) log(`🗄  Reuso DB: ${dbHits} lances (${Math.round(100 * dbHits / analyzedPositions)}%).`, "log-ok");
+      log(`📦 Cache JSON: ${cacheStats.hits} hits / ${cacheStats.misses} misses (${hitRateFinal}%).`, "log-ok");
       printApiDiagnostics();
+
     } catch (e) {
-      removeCursor();
-      console.error(e);
-      log(`❌ Erro na análise: ${e.message}`, "log-err");
+      removeCursor(); console.error(e);
+      log(`❌ Erro: ${e.message}`, "log-err");
+      job.status = "stopped";
     } finally {
-      btn.disabled = false; fetchBtn.disabled = false;
-      btn.textContent = "⚙ Analisar Stockfish";
-      // Telemetria: encerra registro de execução com métricas finais.
       if (SERVER_MODE && execLogId) {
-        const status = (typeof allAnalysis !== "undefined" && allAnalysis.length) ? "completed" : "errored";
-        // posições efetivamente rodadas no engine (descontando reuso do DB)
-        const enginePositions = Math.max(0, analyzedPositions - dbHits);
         try {
           await api("/api/execution-logs/end", {
             id: execLogId,
             duration_seconds: (Date.now() - execStartedAt) / 1000,
-            n_positions_analyzed: enginePositions,
-            n_db_hits: dbHits,
-            n_cache_hits: cacheStats.hits,
-            n_cache_misses: cacheStats.misses,
-            n_failures: apiErrors,
-            status,
+            n_positions_analyzed: Math.max(0, analyzedPositions - dbHits),
+            n_db_hits: dbHits, n_cache_hits: cacheStats.hits,
+            n_cache_misses: cacheStats.misses, n_failures: apiErrors,
+            status: job.status === "done" || job.status === "running" ? "completed" : job.status,
           });
-        } catch (_) { /* não bloquear UI */ }
+        } catch (_) {}
       }
       if (allAnalysis.length) {
-        log(`💾 ${allAnalysis.length} lances persistidos em history.db. Rode /report-myself ou /report-enemy ${USERNAME} para gerar PDF.`, "log-ok");
-      } else {
+        log(`💾 ${allAnalysis.length} lances em history.db. Rode /report-myself ${jobUser} para PDF.`, "log-ok");
+      } else if (job.status !== "paused") {
         log("⚠ Nenhuma análise produzida.", "log-warn");
       }
-      // Atualiza o painel "X partidas / Y pendentes" para refletir o novo estado.
       refreshDbState();
+      renderQueue();
     }
   }
 
