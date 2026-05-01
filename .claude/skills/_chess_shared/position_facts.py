@@ -700,6 +700,73 @@ def detect_exposed_king(board: chess.Board) -> list[dict]:
     return out
 
 
+def detect_pin_family(board: chess.Board) -> list[dict]:
+    """Detecta peças cravadas (pin) com dois subtipos:
+    - pin_prevents_attack: peça cravada ataca alvo valioso mas não pode capturar
+    - pin_prevents_escape: peça cravada de alto valor sem casas seguras na ray do pin
+
+    Só peças de HIGH_VALUE (≥ cavalo) são relatadas para evitar ruído de peões cravados.
+    """
+    HIGH_VALUE = {chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN}
+    out = []
+
+    for color in (chess.WHITE, chess.BLACK):
+        enemy = not color
+        for sq in chess.SquareSet(board.occupied_co[color]):
+            piece = board.piece_at(sq)
+            if piece is None or piece.piece_type not in HIGH_VALUE:
+                continue
+            if not board.is_pinned(color, sq):
+                continue
+
+            pin_ray = board.pin(color, sq)  # SquareSet of squares the piece may move to
+
+            # Subtype A: pin_prevents_attack
+            # Peça cravada ataca pelo menos uma peça inimiga de alto valor,
+            # mas o alvo não está na ray do pin (logo a captura é ilegal).
+            attacks_val_targets = False
+            for target_sq in board.attacks(sq):
+                target = board.piece_at(target_sq)
+                if (target and target.color == enemy
+                        and target.piece_type in HIGH_VALUE
+                        and target_sq not in pin_ray):
+                    attacks_val_targets = True
+                    break
+
+            if attacks_val_targets:
+                out.append({
+                    "kind":     "pin_prevents_attack",
+                    "subtype":  "pin",
+                    "color":    COLOR_NAME[color],
+                    "piece":    SYM[piece.piece_type],
+                    "square":   chess.square_name(sq),
+                })
+                continue  # não duplicar com prevents_escape na mesma peça
+
+            # Subtype B: pin_prevents_escape
+            # Peça de alto valor cravada com zero casas seguras na ray do pin.
+            legal_in_ray = 0
+            for to_sq in pin_ray:
+                if to_sq == sq:
+                    continue
+                target = board.piece_at(to_sq)
+                if target and target.color == color:
+                    continue  # bloqueada por peça própria
+                # simples: se está na ray o lance pode ser legal (checagem fina é cara)
+                legal_in_ray += 1
+
+            if legal_in_ray == 0 and PIECE_VALUE.get(piece.piece_type, 0) >= 3:
+                out.append({
+                    "kind":    "pin_prevents_escape",
+                    "subtype": "pin",
+                    "color":   COLOR_NAME[color],
+                    "piece":   SYM[piece.piece_type],
+                    "square":  chess.square_name(sq),
+                })
+
+    return out
+
+
 # ── Registro central ───────────────────────────────────────────────────
 
 ALL_DETECTORS = [
@@ -729,6 +796,7 @@ ALL_DETECTORS = [
     detect_static_trapped_piece,
     detect_overloaded_pieces,
     detect_exposed_king,
+    detect_pin_family,
     # caráter
     detect_center_type,
     detect_position_phase,

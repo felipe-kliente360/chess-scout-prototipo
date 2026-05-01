@@ -85,6 +85,17 @@ Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cache
 | 11 | Armadilhas e padrões para induzir | `section_10_traps` |
 | 12 | Programa de treino — você contra ele | `section_puzzle_program` (opcional) |
 
+**Seção 3 (vulnerabilidades táticas) — use `tactical_profile` do adversário:**
+
+`c.kpis.tactical_profile` expõe os padrões táticos dele:
+- `weighted_top`: top-5 temas ponderados por papel×modalidade. **Papel B** (adversário aproveitou erro dele) = fragilidades reais — são os temas a induzir. **Papel C** (adversário não aproveitou) = situações em que ele perdoa oponentes — indique que você vai aproveitar quando aparecer.
+- `role_totals.B` alto: os erros dele frequentemente criam oportunidades imediatas — ataque com posições táticas abertas.
+- `clock_tactics.pressure_blunder_ratio` > 2.0: sob pressão de relógio ele colapsa taticamente — jogue partidas longas com reserva de tempo no final; force complicações no terço final.
+- `clock_tactics.under_pressure.themes_top3`: quais temas aparecem quando o relógio está baixo — esses são os erros a provocar no final da partida.
+- `trend_lines`: temas com `delta > 0` estão piorando (ele está errando mais neles). Themes com `delta < 0` estão melhorando (evitar contar com eles se estiver em queda recente).
+
+Nomes de tema seguem taxonomia Lichess (`fork`, `pin`, `discoveredAttack`, `backRankMate`, `capturingDefender`, `intermezzo`, `kingsideAttack`, etc.) — use rótulos PT-BR no texto.
+
 **Seção 4 (repertório) — específico:** use `c.openings_by_family` para listar o que ele mais joga; `c.openings_weak_spots` para identificar famílias onde ele perde — essas são as armas a induzir. Citar `c.eco_stats.avg_eco_ply`: se baixo, ele improvisa cedo (atacar com linha forçada); se alto, conhece teoria (sair do livro com transposições laterais).
 
 **Seção 9 (gestão de tempo dele) — específico:** use `c.time_analysis`. Foque na exploração tática: (a) como ele administra o relógio (mediana por fase) — onde ele "afoga" ou "desliga"; (b) leitura de `time_pressure.blunder_rate_ratio`: razão >1.5 indica que ele desmonta sob pressão (acelere; force trocas/complicações no terço final); (c) padrão de "pensou e errou" (top `long_think_blunders`) — viés do otimismo dele em cálculo longo, atacar com posições onde refutação é concreta; (d) "errou rápido" (top `fast_blunders`) — premove ou reflexo, induzir lances forçados em sequência. Encerre com 1 instrução tática (ex: "complique no lance 25–35 — é onde a curva de erro dele dispara em pressão"). Se `available=false`, pule.
@@ -97,7 +108,7 @@ Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cache
 
 **Seção 10 (armadilhas) — específico:** 2–3 padrões táticos repetidos que você pode induzir baseado nas partidas paradigmáticas. Ex: "Nas 3 derrotas vs adversários ≥1400, ele falhou em transição abertura→meio-jogo — força trocas no lance 12–15 com peão central avançado."
 
-**Seção 11 (programa de puzzles) — específico:** o `compute.py` injeta `c.puzzle_program` automaticamente. Aqui o `suggested_rating` representa o **rating estimado dele** (não seu) — você treina puzzles nessa faixa e nesses temas para entender o que ele resolve e o que ele falha em ver. Você pode opcionalmente escrever `section_puzzle_program` em sections.json (1–2 parágrafos): por que esses temas são os que ele cai/explora, e como integrar com o app de treino tático.
+**Seção 11 (programa de puzzles) — específico:** o `compute.py` injeta `c.puzzle_program` automaticamente. Aqui o `suggested_rating` representa o **rating estimado dele** (não seu) — você treina puzzles nessa faixa e nesses temas para entender o que ele resolve e o que ele falha em ver. Temas com `source="detected"` vêm das partidas reais dele — são as fraquezas concretas a explorar. **Os nomes em `puzzle_program.themes[].theme` são camelCase Lichess exato** — compatíveis com o Woodpecker para montar sessões de treino. Você pode opcionalmente escrever `section_puzzle_program` em sections.json (1–2 parágrafos): por que esses temas são os que ele cai/explora, e como integrar com o app de treino tático.
 
 Salvar como `data/<username>_<timestamp>_enemy_sections.json`:
 

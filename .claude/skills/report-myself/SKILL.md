@@ -101,11 +101,26 @@ Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cache
 
 **Seção 5 (aberturas) — específico:** use `c.openings_by_family` para descrever famílias dominantes; `c.eco_stats.avg_eco_ply` para profundidade média de teoria; `c.openings_weak_spots` para alvos de estudo. Veja faixas em `theory.md` seção 5b.
 
+**Seção 4 (erros táticos) — use `tactical_profile` completo:**
+
+`c.kpis.tactical_profile` expõe:
+- `weighted_top`: top-5 temas ponderados por papel×modalidade (pontuação, não contagem). Os **nomes de tema seguem taxonomia Lichess exata** (`fork`, `pin`, `discoveredAttack`, `backRankMate`, `capturingDefender`, etc.) — use os rótulos PT-BR de `CANONICAL_THEMES` no texto.
+- `role_totals.A/B/C`: soma de peso por papel. Papel A = jogador não viu o motivo (cegueira tática). Papel B = erro gerou oportunidade aproveitada pelo adversário. Papel C = adversário perdoou.
+- `by_time_class`: top-3 temas por modalidade (rapid / blitz).
+- `clock_tactics.pressure_blunder_ratio`: razão de erros táticos sob pressão de relógio vs. normal. Se > 2.0 = degradação severa; mencionar explicitamente em §4 ou §9.
+- `clock_tactics.under_pressure.themes_top3`: quais temas aparecem quando o relógio está baixo.
+- `trend_lines`: deltas entre os dois períodos mais recentes (YYYY-MM) — identifica temas em ascensão (delta > 0) vs. em declínio. Use para calibrar progresso na Seção 11.
+
+Narrativa por papel (§4):
+- Papel A dominante: "Você **não está vendo** o motivo quando ele está disponível — trabalhar recognition de padrões visuais."
+- Papel B dominante: "Seus erros **criam oportunidades** que o adversário aproveita — melhora na posição antes do lance."
+- Papel C dominante: "Adversários frequentemente **perdonam** táticas disponíveis — seu nível é sólido, mas o adversário ainda erra mais."
+
 **Seção 9 (gestão de tempo) — específico:** use `c.time_analysis` (se `available=true`). Tabelas e KPIs já são renderizados pelo macro `time_analysis_block`; você escreve `section_time_management` (1–2 parágrafos) cobrindo: (a) padrão geral de uso de tempo (mediana por fase, onde gasta mais), (b) o que a pressão de relógio (`time_pressure.blunder_rate_ratio`) revela — degradação real vs. neutra, (c) leitura de "pensou e errou" (cálculo longo que falhou — viés de otimismo / cegueira tática) e "errou rápido" (premove ou impulso). Termine com 1 frase prática (ex: "regule o relógio na transição abertura→meio-jogo: 65% dos seus erros graves vêm de decisões em &lt;3s lá"). Se `available=false`, pule a seção (template já mostra mensagem apropriada). Veja §22 do theory.md para guia conceitual.
 
-**Seção 11 (plano) — específico:** 3–5 prescrições priorizadas por retorno/tempo. Categoria fixa "primeiro estudar finais clássicos se for o ponto fraco" (Lucena/Philidor/oposição), depois repertório, depois cobertura ECO/depth se baixo. Calibre pelo `confidence_pct`.
+**Seção 11 (plano) — específico:** 3–5 prescrições priorizadas por retorno/tempo. Categoria fixa "primeiro estudar finais clássicos se for o ponto fraco" (Lucena/Philidor/oposição), depois repertório, depois cobertura ECO/depth se baixo. Calibre pelo `confidence_pct`. Use `tactical_profile.trend_lines` para indicar progresso vs. persistência de fraqueza.
 
-**Seção 12 (programa de puzzles) — específico:** o `compute.py` já injeta `c.puzzle_program` com `suggested_rating`, `rating_range`, `themes` (alta/média prioridade, com `rationale`). O template renderiza tabela automática. Você pode opcionalmente escrever `section_puzzle_program` em sections.json (1–2 parágrafos): por que esses temas, como combinar com Plano 30 dias da seção 11, e como usar como input no app de treino tático.
+**Seção 12 (programa de puzzles) — específico:** o `compute.py` já injeta `c.puzzle_program` com `suggested_rating`, `rating_range`, `themes` (alta/média prioridade, com `rationale` e `source`). Temas com `source="detected"` vêm das partidas reais do jogador e têm prioridade mais alta. **Os nomes de tema em `puzzle_program.themes[].theme` são camelCase exato da taxonomia Lichess** (ex: `fork`, `pin`, `discoveredAttack`) — o app Woodpecker os consome diretamente para montar conjuntos de treino. O template renderiza tabela automática. Você pode opcionalmente escrever `section_puzzle_program` em sections.json (1–2 parágrafos): por que esses temas, como combinar com Plano 30 dias da seção 11, e como usar como input no Woodpecker.
 
 Salvar como `data/<username>_<timestamp>_myself_sections.json`:
 
