@@ -421,6 +421,7 @@
       log(`  ✓ ${allGames.length} partidas carregadas do DB.`);
       const ecoHits = applyOpeningClassification(allGames);
       log(`📚 Aberturas reclassificadas via ECO: ${ecoHits}/${allGames.length}.`);
+      logTacticalCoverage(allGames);
       await loadPositionCache();
       await loadCalibration();
       // Mostra prévia e dispara analyzeGames (que já reusa game_analyses no DB).
@@ -631,6 +632,21 @@
     return hits;
   }
 
+  function logTacticalCoverage(games) {
+    const rb = games.filter(g => g.time_class === "rapid" || g.time_class === "blitz").length;
+    const pct = games.length ? Math.round(100 * rb / games.length) : 0;
+    if (rb === 0) {
+      log(`⚠ Nenhuma partida rapid/blitz na amostra — análise tática com confiança insuficiente (daily e bullet excluídos dos pesos táticos).`, "log-warn");
+    } else if (rb < 15) {
+      const cls = pct < 40 ? "log-warn" : "log-normal";
+      log(`⚠ ${rb}/${games.length} partidas rapid/blitz (${pct}%) — confiança tática baixa; bullet incluído com peso reduzido se necessário.`, cls);
+    } else if (pct < 40) {
+      log(`⚠ ${rb}/${games.length} partidas são rapid/blitz (${pct}%) — cobertura tática reduzida mas funcional.`, "log-warn");
+    } else {
+      log(`  ✓ Cobertura tática: ${rb}/${games.length} rapid/blitz (${pct}%).`);
+    }
+  }
+
   function resetSession() {
     document.getElementById("log").innerHTML = '<span class="log-idle">Aguardando início...</span>';
     document.getElementById("stats").style.display = "none";
@@ -710,6 +726,7 @@
       const ecoHits = applyOpeningClassification(allGames);
       const pct = allGames.length ? Math.round((ecoHits / allGames.length) * 100) : 0;
       log(`📚 Aberturas classificadas via ECO: ${ecoHits}/${allGames.length} (${pct}%).`);
+      logTacticalCoverage(allGames);
       // Pré-carrega o cache para que a estimativa já reflita hit-rate
       await loadPositionCache();
       // Calibração observada para ajustar estimateSecondsPerPosition.

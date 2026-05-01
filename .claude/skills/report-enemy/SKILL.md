@@ -93,6 +93,7 @@ Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cache
 - `clock_tactics.pressure_blunder_ratio` > 2.0: sob pressão de relógio ele colapsa taticamente — jogue partidas longas com reserva de tempo no final; force complicações no terço final.
 - `clock_tactics.under_pressure.themes_top3`: quais temas aparecem quando o relógio está baixo — esses são os erros a provocar no final da partida.
 - `trend_lines`: temas com `delta > 0` estão piorando (ele está errando mais neles). Themes com `delta < 0` estão melhorando (evitar contar com eles se estiver em queda recente).
+- `tactical_confidence.level`: `"alta"` / `"média"` / `"baixa"` / `"insuficiente"`. Se `level ≠ "alta"`, adicione nota em §3 antes da lista de vulnerabilidades: "Confiança tática [nível] — [note]". Se `"insuficiente"`, não cite temas específicos; diga apenas que a amostra é dominada por bullet/daily e a análise tática é inconclusiva.
 
 Nomes de tema seguem taxonomia Lichess (`fork`, `pin`, `discoveredAttack`, `backRankMate`, `capturingDefender`, `intermezzo`, `kingsideAttack`, etc.) — use rótulos PT-BR no texto.
 

@@ -78,6 +78,7 @@ Mesmas regras de myself/enemy: `full_reuse` → copia, `partial_regen` → regen
 - `clock_tactics.pressure_blunder_ratio`: se > 2.0 → gestão de tempo é urgente; incluir exercícios com relógio (jogo rápido com limite restrito).
 - `clock_tactics.under_pressure.themes_top3`: os padrões que colapsa sob pressão — prescrever puzzles desses temas especificamente em modo blitz.
 - `trend_lines`: temas com `delta > 0` estão piorando — são os targets da próxima semana. Temas com `delta < 0` estão melhorando — mencionar como progresso observado.
+- `tactical_confidence.level`: `"alta"` / `"média"` / `"baixa"` / `"insuficiente"`. **Obrigatório no plano didático (§9)**: se `level ≠ "alta"`, adicione nota antes das prescrições táticas — use `tactical_confidence.note` como base. Se `"baixa"` com `weights_adapted=true`, sinalize que o aluno joga predominantemente bullet/daily e o plano de treino deve incluir incentivo a jogar mais rapid. Se `"insuficiente"`, não prescreva puzzles por tema; prescreva sessão diagnóstica de formatos.
 
 Woodpecker: temas de `puzzle_program.themes[].theme` são camelCase Lichess exato — passam direto para o Woodpecker montar o conjunto de treino do aluno.
 

@@ -110,6 +110,12 @@ Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cache
 - `clock_tactics.pressure_blunder_ratio`: razão de erros táticos sob pressão de relógio vs. normal. Se > 2.0 = degradação severa; mencionar explicitamente em §4 ou §9.
 - `clock_tactics.under_pressure.themes_top3`: quais temas aparecem quando o relógio está baixo.
 - `trend_lines`: deltas entre os dois períodos mais recentes (YYYY-MM) — identifica temas em ascensão (delta > 0) vs. em declínio. Use para calibrar progresso na Seção 11.
+- `tactical_confidence`: metadado de qualidade da amostra tática.
+  - `level`: `"alta"` (≥15 rapid+blitz), `"média"` (8–14), `"baixa"` (<8, bullet pode ter sido incluído), `"insuficiente"` (sem rapid/blitz/bullet).
+  - `n_rapid_blitz`: partidas que contribuíram com peso normal.
+  - `weights_adapted`: `true` se bullet foi incluído com peso 0.4 por fallback.
+  - `note`: texto explicativo pronto para citar no PDF.
+  - **Regra de exibição**: se `level ≠ "alta"`, adicione nota explícita antes da narrativa de §4 — use o texto de `note` como base. Não invente confiança que o dado não sustenta. Se `level = "insuficiente"`, escreva apenas "Análise tática indisponível — amostra sem partidas rapid/blitz." e pule os temas.
 
 Narrativa por papel (§4):
 - Papel A dominante: "Você **não está vendo** o motivo quando ele está disponível — trabalhar recognition de padrões visuais."

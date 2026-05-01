@@ -874,8 +874,11 @@ def load_from_db(username: str) -> tuple[pd.DataFrame, pd.DataFrame, int | None,
 # Pesos de papel: A=oportunidade perdida, B=erro punido, C=erro não punido
 _ROLE_WEIGHTS: dict[str, float] = {"A": 2.0, "B": 1.0, "C": 0.5}
 
-# Pesos por modalidade: rapid e blitz pesam; bullet e daily ignorados
+# Pesos por modalidade base. Bullet é adaptativo (ver aggregate_tactical_weighted).
+# Daily sempre 0: motor assist torna temas táticos inválidos.
 _TC_WEIGHTS: dict[str, float] = {"rapid": 2.0, "blitz": 1.0, "bullet": 0.0, "daily": 0.0}
+# Partidas rapid+blitz mínimas para bullet permanecer 0. Abaixo: bullet → 0.4.
+_MIN_RB_FOR_BULLET_ZERO = 15
 
 # Fatos puramente descritivos — excluídos de correlações táticas
 _PURE_DESCRIPTIVE = {"center_type", "position_phase", "castled", "opposite_side_castles",
@@ -991,18 +994,32 @@ def classify_tactical_roles(
 def aggregate_tactical_weighted(
     moves_df: pd.DataFrame,
     game_tc_map: dict[int, str],
-) -> tuple[list[dict], dict, dict, list[dict]]:
-    """Agrega temas táticos com pesos por papel (A/B/C) e modalidade (rapid/blitz).
+) -> tuple[list[dict], dict, dict, list[dict], dict]:
+    """Agrega temas táticos com pesos por papel (A/B/C) e modalidade.
 
-    Retorna (weighted_top5, role_totals, by_time_class, timeline_rows).
-    timeline_rows = lista de dicts prontos para emit_tactical_timeline.
+    Pesos base: rapid 2.0, blitz 1.0, daily 0.0 (fixo — motor assist invalida temas).
+    Bullet adaptativo: 0.0 quando rapid+blitz ≥ _MIN_RB_FOR_BULLET_ZERO; 0.4 como fallback.
+
+    Retorna (weighted_top5, role_totals, by_time_class, timeline_rows, tactical_confidence).
     """
     from collections import defaultdict
+
+    # Conta jogos por TC para decidir pesos adaptativos de bullet
+    tc_game_counts: dict[str, int] = defaultdict(int)
+    for tc in game_tc_map.values():
+        tc_game_counts[tc] += 1
+    n_rapid_blitz = tc_game_counts.get("rapid", 0) + tc_game_counts.get("blitz", 0)
+    n_bullet_games = tc_game_counts.get("bullet", 0)
+
+    bullet_w = 0.0 if n_rapid_blitz >= _MIN_RB_FOR_BULLET_ZERO else (0.4 if n_bullet_games > 0 else 0.0)
+    weights_adapted = bullet_w > 0.0
+    _effective_tc_weights = {**_TC_WEIGHTS, "bullet": bullet_w}
 
     weighted: dict[str, float] = defaultdict(float)
     breakdown: dict[str, dict[str, float]] = defaultdict(lambda: {"A": 0.0, "B": 0.0, "C": 0.0})
     by_tc: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     role_totals: dict[str, float] = {"A": 0.0, "B": 0.0, "C": 0.0}
+    n_bullet_positions_used = 0
 
     # Para timeline longitudinal: (period, time_class, theme, role) → (weighted, raw)
     timeline: dict[tuple, list] = defaultdict(lambda: [0.0, 0])
@@ -1015,9 +1032,6 @@ def aggregate_tactical_weighted(
         & (moves_df["loss_cp"] >= 50)
     ].copy() if "tactical_role" in moves_df.columns else pd.DataFrame()
 
-    if not len(flagged):
-        return [], role_totals, {}, []
-
     # Pesos relativos para top-3 temas por posição (1º = 1.0, 2º = 0.5, 3º = 0.25)
     _RANK_FACTOR = [1.0, 0.5, 0.25]
 
@@ -1025,9 +1039,12 @@ def aggregate_tactical_weighted(
         role = str(row.get("tactical_role") or "B")
         tc = game_tc_map.get(int(row.get("game_index", 0)), "blitz")
 
-        tc_w = _TC_WEIGHTS.get(tc, 0.0)
+        tc_w = _effective_tc_weights.get(tc, 0.0)
         if tc_w == 0.0:
-            continue  # bullet/daily ignorados
+            continue  # daily sempre ignorado; bullet ignorado se rapid+blitz adequado
+
+        if tc == "bullet":
+            n_bullet_positions_used += 1
 
         role_w = _ROLE_WEIGHTS.get(role, 1.0)
         dist = row.get("tactic_distance")
@@ -1095,7 +1112,37 @@ def aggregate_tactical_weighted(
         for k, v in timeline.items()
     ]
 
-    return weighted_top, role_totals, by_tc_out, timeline_rows
+    # Nível de confiança baseado na composição da amostra
+    total_weighted = sum(weighted.values())
+    if n_rapid_blitz >= 15 and total_weighted > 0:
+        conf_level = "alta"
+        conf_note = ""
+    elif n_rapid_blitz >= 8:
+        conf_level = "média"
+        conf_note = (f"Amostra com {n_rapid_blitz} partidas rapid/blitz — "
+                     f"ranking temático pode variar com mais dados.")
+    elif total_weighted > 0:
+        conf_level = "baixa"
+        if weights_adapted:
+            conf_note = (f"Apenas {n_rapid_blitz} partidas rapid/blitz — bullet incluído "
+                         f"com peso reduzido (0.4). Ranking temático indicativo, não definitivo.")
+        else:
+            conf_note = (f"Apenas {n_rapid_blitz} partidas rapid/blitz — "
+                         f"ranking temático pouco confiável.")
+    else:
+        conf_level = "insuficiente"
+        conf_note = ("Nenhuma partida rapid/blitz com temas detectados — "
+                     "análise tática indisponível para esta amostra.")
+
+    tactical_confidence = {
+        "level":           conf_level,
+        "n_rapid_blitz":   n_rapid_blitz,
+        "n_bullet_used":   n_bullet_positions_used if weights_adapted else 0,
+        "weights_adapted": weights_adapted,
+        "note":            conf_note,
+    }
+
+    return weighted_top, role_totals, by_tc_out, timeline_rows, tactical_confidence
 
 
 def correlate_theme_facts(moves_df: pd.DataFrame) -> dict[str, list[dict]]:
@@ -1505,7 +1552,7 @@ def main():
     user_moves["date"] = user_moves["game_index"].map(date_by_game)
     user_moves["time_class_tc"] = user_moves["game_index"].map(game_tc_map)
 
-    tactical_weighted_top, role_totals, tactical_by_tc, _timeline_rows = \
+    tactical_weighted_top, role_totals, tactical_by_tc, _timeline_rows, tactical_confidence_meta = \
         aggregate_tactical_weighted(user_moves, game_tc_map)
     theme_facts_corr = correlate_theme_facts(user_moves)
     clock_tactics_split = compute_clock_tactics_split(user_moves)
@@ -2170,13 +2217,14 @@ def main():
             "tactical_themes_top": tactical_top,
             "tactical_themes_by_phase": tactical_by_phase,
             "tactical_profile": {
-                "weighted_top":      tactical_weighted_top,
-                "role_totals":       {k: round(v, 2) for k, v in role_totals.items()},
-                "by_time_class":     {tc: [{"theme": t, "score": round(s, 2)} for t, s in items]
-                                      for tc, items in tactical_by_tc.items()},
-                "theme_facts_corr":  theme_facts_corr,
-                "clock_tactics":     clock_tactics_split,
-                "trend_lines":       _compute_trend_lines(_timeline_rows),
+                "weighted_top":         tactical_weighted_top,
+                "role_totals":          {k: round(v, 2) for k, v in role_totals.items()},
+                "by_time_class":        {tc: [{"theme": t, "score": round(s, 2)} for t, s in items]
+                                         for tc, items in tactical_by_tc.items()},
+                "theme_facts_corr":     theme_facts_corr,
+                "clock_tactics":        clock_tactics_split,
+                "trend_lines":          _compute_trend_lines(_timeline_rows),
+                "tactical_confidence":  tactical_confidence_meta,
             },
             "position_facts_top": position_facts_top,
             "position_facts_correlation": facts_corr,
