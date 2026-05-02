@@ -1494,6 +1494,12 @@
           // Rápida: pula posições de abertura (ply ≤ ANALYSIS_PLY_MIN)
           if (ANALYSIS_PLY_MIN > 0 && mv.ply <= ANALYSIS_PLY_MIN) continue;
 
+          // Rápida: só lances do próprio jogador (erros tipo A são erros do player, não do adversário)
+          if (ANALYSIS_MODE === "quick") {
+            const playerColor = game.color === "white" ? "w" : "b";
+            if (mv.color !== playerColor) continue;
+          }
+
           const cachedRow = cachedForGame[mv.ply];
           let analysis, cameFromDb = false;
           if (cachedRow && cachedRow.depth >= STOCKFISH_DEPTH) {
