@@ -1512,8 +1512,8 @@
           if (analysis.best_move) {
             try {
               const t = TacticalThemes.classifyPosition(mv.fen_before, analysis.best_move, mv.move_uci);
-              // Rápida: só táticas tipo A (source C = delta best_move, motivo faltado pelo jogador)
-              if (t && (ANALYSIS_MODE !== "quick" || t.source === "C")) tactical = t;
+              // Rápida: só táticas tipo A — best_move tinha motivo (source C) e jogador não jogou
+              if (t && (ANALYSIS_MODE !== "quick" || (t.source === "C" && mv.move_uci !== analysis.best_move))) tactical = t;
             }
             catch (_) {}
           }
