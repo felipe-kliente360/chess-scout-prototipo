@@ -208,10 +208,13 @@
         Análise
         <div style="display:flex;gap:14px;font-size:0.9em;padding:4px 0">
           <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
-            <input type="radio" name="analysis-mode" value="quick" checked> rápida (30 partidas)
+            <input type="radio" name="analysis-mode" value="flash"> flash (abertura+tempo)
           </label>
           <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
-            <input type="radio" name="analysis-mode" value="full"> completa (100 partidas)
+            <input type="radio" name="analysis-mode" value="quick" checked> rápida (30 · ply&gt;15 · 200ms)
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="radio" name="analysis-mode" value="full"> completa (100 · 2-pass)
           </label>
         </div>
         <span style="color:#555;font-size:0.8em">por recência · todos os formatos</span>
@@ -296,6 +299,9 @@
   // com movetime 1s; qualquer posição com depth >= 14 é considerada OK.
   const STOCKFISH_DEPTH = 14;
   let ENGINE = "local";
+  let ANALYSIS_MODE = "quick";
+  let ANALYSIS_PLY_MIN = 15; // quick mode: skip ply ≤ this
+  let MOVETIME_MS = 200;     // null = go depth; number = go movetime
   const TIME_CLASSES = new Set(["bullet", "blitz", "rapid", "daily"]);
   const QUOTA_MODE = "total";
   let allGames = [];
@@ -462,10 +468,22 @@
     const mode = document.querySelector('input[name="analysis-mode"]:checked')?.value || "quick";
     if (!u) throw new Error("Username vazio.");
     USERNAME = u;
-    TARGET = mode === "full" ? 100 : 30;
+    ANALYSIS_MODE = mode;
+    if (mode === "flash") {
+      TARGET = 30; ANALYSIS_PLY_MIN = 0; MOVETIME_MS = null;
+    } else if (mode === "quick") {
+      TARGET = 30; ANALYSIS_PLY_MIN = 15; MOVETIME_MS = 200;
+    } else {
+      TARGET = 100; ANALYSIS_PLY_MIN = 0; MOVETIME_MS = null;
+    }
     ENGINE = eng === "local" ? "local" : "api";
-    const modeLabel = mode === "full" ? "100 partidas (completa)" : "30 partidas (rápida)";
-    document.getElementById("subtitle").textContent = `${USERNAME} · ${modeLabel} · 2-pass 1s+2s · ${ENGINE}`;
+    const modeLabel = mode === "flash" ? "30 partidas (flash)" :
+                      mode === "full"  ? "100 partidas (completa)" :
+                                         "30 partidas (rápida)";
+    const analysisDesc = mode === "flash" ? "sem engine · abertura+tempo" :
+                         mode === "quick" ? "200ms · ply>15 · táticas A" :
+                                            "2-pass 1s+2s";
+    document.getElementById("subtitle").textContent = `${USERNAME} · ${modeLabel} · ${analysisDesc} · ${ENGINE}`;
   }
 
   // Calibração observada (preenchida sob demanda via /api/execution-logs/calibration).
@@ -552,13 +570,18 @@
     const positions = expectedTotalPositions();
     const hitRate = expectedCacheHitRate();
     const positionsToAnalyze = Math.round(positions * (1 - hitRate));
-    // 2-pass movetime: ~0.85s pass1 + 0.15 * 2s pass2 = ~1.15s/posição média
-    // (backend nativo). Browser WASM é mais lento: ~2s/posição.
-    const secPerPos = eng === "local" ? 2.0 : 1.15;
+    if (ANALYSIS_MODE === "flash") {
+      el.textContent = "⚡ flash — sem engine, instantâneo";
+      return;
+    }
+    // quick: 200ms/posição (WASM). full: ~2s (WASM) ou ~1.15s (backend nativo 2-pass).
+    const secPerPos = ANALYSIS_MODE === "quick" ? 0.25 :
+                      eng === "local" ? 2.0 : 1.15;
     const sec = positionsToAnalyze * secPerPos;
     const lo = formatDuration(sec * 0.8), hi = formatDuration(sec * 1.4);
     const avgPlies = avgPliesFromGames();
-    const engLabel = eng === "local" ? "Stockfish local (WASM)" : "backend nativo 2-pass";
+    const engLabel = ANALYSIS_MODE === "quick" ? "WASM 200ms" :
+                     eng === "local" ? "Stockfish local (WASM)" : "backend nativo 2-pass";
     const cacheNote = hitRate > 0 ? ` · cache ~${Math.round(hitRate * 100)}%` : "";
     const basis = allGames.length
       ? `${allGames.length} partidas (${avgPlies} lances/partida em média, ${positions} posições${cacheNote})`
@@ -802,7 +825,9 @@
     document.getElementById("preview").style.display = "none";
     allGames = [];
     log("─".repeat(40), "log-idle");
-    log(`▶ Nova busca: ${USERNAME} · ${TARGET} partidas por recência · 2-pass 1s+2s`);
+    const _modeDesc = ANALYSIS_MODE === "flash" ? "sem engine · abertura+tempo" :
+                      ANALYSIS_MODE === "quick" ? "200ms · ply>15 · táticas A" : "2-pass 1s+2s";
+    log(`▶ Nova busca: ${USERNAME} · ${TARGET} partidas por recência · ${_modeDesc}`);
 
     try {
       log("Carregando base ECO (Lichess)...");
@@ -1263,7 +1288,7 @@
       };
       SFWorker.addEventListener("message", handler);
       SFWorker.postMessage(`position fen ${fen}`);
-      SFWorker.postMessage(`go depth ${depth}`);
+      SFWorker.postMessage(MOVETIME_MS != null ? `go movetime ${MOVETIME_MS}` : `go depth ${depth}`);
     });
   }
   // ──────────────────────────────────────────────────────────────────
@@ -1376,7 +1401,10 @@
 
     try {
       const resuming = job.resumeFromGame > 0;
-      log(`▶ ${resuming ? "Retomando" : "Iniciando"} análise [${ENGINE === "local" ? "WASM" : "API"}, 2-pass] — ${jobUser} (${jobGames.length} partidas)`, "log-normal");
+      const modeTag = ANALYSIS_MODE === "flash" ? "flash·sem-engine" :
+                      ANALYSIS_MODE === "quick" ? `WASM·200ms·ply>${ANALYSIS_PLY_MIN}` :
+                      `${ENGINE === "local" ? "WASM" : "API"}·2-pass`;
+      log(`▶ ${resuming ? "Retomando" : "Iniciando"} análise [${modeTag}] — ${jobUser} (${jobGames.length} partidas)`, "log-normal");
 
       await loadPositionCache();
       await TacticalThemes.loadTacticalIndex();
@@ -1448,6 +1476,24 @@
         for (const mv of moves) {
           if (job.stopFlag || job.pauseFlag) break;
 
+          // Flash: sem engine — abertura + tempo apenas
+          if (ANALYSIS_MODE === "flash") {
+            allAnalysis.push({
+              game_index: gi + 1, game_url: game.url, date: game.date, color: game.color,
+              opponent: game.opponent, ply: mv.ply, move_number: Math.ceil(mv.ply / 2),
+              side_to_move: mv.color, move_san: mv.move_san, move_uci: mv.move_uci,
+              fen_before: mv.fen_before, depth: 0,
+              evaluation: "", mate: "", best_move: "", continuation: "",
+              tactical_theme: "", tactical_confidence: "", tactical_source: "", tactical_themes: "",
+            });
+            analyzedPositions++;
+            job.progress.analyzed = analyzedPositions;
+            continue;
+          }
+
+          // Rápida: pula posições de abertura (ply ≤ ANALYSIS_PLY_MIN)
+          if (ANALYSIS_PLY_MIN > 0 && mv.ply <= ANALYSIS_PLY_MIN) continue;
+
           const cachedRow = cachedForGame[mv.ply];
           let analysis, cameFromDb = false;
           if (cachedRow && cachedRow.depth >= STOCKFISH_DEPTH) {
@@ -1464,7 +1510,11 @@
 
           let tactical = null;
           if (analysis.best_move) {
-            try { tactical = TacticalThemes.classifyPosition(mv.fen_before, analysis.best_move, mv.move_uci); }
+            try {
+              const t = TacticalThemes.classifyPosition(mv.fen_before, analysis.best_move, mv.move_uci);
+              // Rápida: só táticas tipo A (source C = delta best_move, motivo faltado pelo jogador)
+              if (t && (ANALYSIS_MODE !== "quick" || t.source === "C")) tactical = t;
+            }
             catch (_) {}
           }
           allAnalysis.push({
