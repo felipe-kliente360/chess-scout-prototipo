@@ -130,6 +130,22 @@ Histórico das decisões de design + próximos passos pendentes. Vivente: atuali
 
 ---
 
+## ✅ Entregue (2026-05-03)
+
+### 3 modos de análise (Flash / Rápida / Completa)
+
+- **Flash**: zero Stockfish. Itera todos os lances para abertura + tempo. Instantâneo.
+- **Rápida**: 30 partidas, só lances do próprio jogador, ply > 15, `go movetime 200ms`. Táticas **tipo A** apenas (fingerprint C + jogador não jogou o best_move = oportunidade tática deixada passar).
+- **Completa**: 100 partidas, todos os lances, depth 14 (browser WASM) ou 2-pass 1s+2s (backend nativo). Todos os tipos A+B+C quando implementados.
+
+**Taxonomia de erros táticos (tipos A/B/C):**
+- **A** — jogador tinha tática disponível no best_move e não aproveitou. Detectável direto via fingerprint C.
+- **B** — jogador criou oportunidade para o adversário (em janela de X lances) que foi aproveitada. Requer cross-referência lances consecutivos + análise do FEN pós-lance.
+- **C** — jogador criou oportunidade "taruca" para o adversário que não foi aproveitada (sortudo). Mesmo mecanismo de B, verificação inversa.
+- B e C vão para Completa quando implementados. Rápida fica restrita a A (foco de treino do próprio jogador).
+
+---
+
 ## ✅ Entregue (2026-05-01)
 
 ### Simplificação de parâmetros de coleta

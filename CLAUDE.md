@@ -203,6 +203,8 @@ Quando produto mudar, **atualizar essas docs no mesmo commit** que a mudança de
 | Parâmetros de coleta: sempre por recência, toggle rápida/completa (sem filtro de modalidade) | 2026-05-01 | 30 partidas = direcional; 100 = produção. `QUOTA_MODE` e `TIME_CLASSES` constantes. `fetchProfileTrend` removido. |
 | Confiança tática adaptativa: bullet peso 0.4 quando rapid+blitz < 15         | 2026-05-01 | `_MIN_RB_FOR_BULLET_ZERO = 15`; `tactical_confidence` em `kpis.tactical_profile`; SKILL.md das 3 perspectivas atualizados |
 | Fila de análise multi-jogador no UI (pausa/stop/resume com ponto salvo)       | 2026-05-01 | `jobQueue`, `runQueuedAnalysis(job)`, painel FILA DE ANÁLISE; `pauseFlag`/`stopFlag`/`resumeFromGame` |
+| 3 modos de análise: Flash / Rápida / Completa                                  | 2026-05-03 | Flash=sem Stockfish; Rápida=30 partidas + ply>15 + 200ms + só lances do jogador + táticas tipo A; Completa=100 partidas + todos os lances |
+| Taxonomia de erros táticos A/B/C                                               | 2026-05-03 | A=jogador deixou passar tática (Rápida+Completa); B=criou oportunidade que adversário aproveitou; C=criou oportunidade que adversário perdeu. B+C só no Completo quando implementados. |
 
 ### Em aberto (decidir num próximo ciclo)
 
@@ -309,4 +311,4 @@ Quando algo não está claro ou destoa de uma decisão prévia, eu pergunto ante
 - Quando um padrão técnico da seção 3 mudar.
 - Quando emergir uma lição da seção 7 que valha registrar.
 
-Última atualização: 2026-05-01 — Simplificação params coleta (rápida/completa por recência); confiança tática adaptativa (bullet fallback, `tactical_confidence`); fila de análise multi-jogador (pausa/stop/resume).
+Última atualização: 2026-05-03 — 3 modos de análise (Flash/Rápida/Completa); taxonomia de erros táticos A/B/C; Rápida restrita a tipo A (lances do próprio jogador, ply>15, 200ms).
