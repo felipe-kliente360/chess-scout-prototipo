@@ -1427,7 +1427,6 @@
       // Pré-carrega análises existentes do DB para este conjunto de partidas
       const existingByGame = {};
       let pendingPostBuffer = [];
-      const POST_SAFETY_NET = 200;
       if (SERVER_MODE) {
         try {
           const ids = jobGames.map(g => g.url || `${jobUser}_${g.date}_${g.opponent}`).filter(Boolean);
@@ -1472,6 +1471,8 @@
 
         const gameId = game.url || `${jobUser}_${game.date}_${game.opponent}`;
         const cachedForGame = existingByGame[gameId] || {};
+        const gameAnalysisStartIdx = allAnalysis.length;
+        const playerColorFull = game.color; // "white" ou "black"
 
         for (const mv of moves) {
           if (job.stopFlag || job.pauseFlag) break;
@@ -1485,6 +1486,7 @@
               fen_before: mv.fen_before, depth: 0,
               evaluation: "", mate: "", best_move: "", continuation: "",
               tactical_theme: "", tactical_confidence: "", tactical_source: "", tactical_themes: "",
+              tactical_role: "", _cameFromDb: false,
             });
             analyzedPositions++;
             job.progress.analyzed = analyzedPositions;
@@ -1494,11 +1496,9 @@
           // Rápida: pula posições de abertura (ply ≤ ANALYSIS_PLY_MIN)
           if (ANALYSIS_PLY_MIN > 0 && mv.ply <= ANALYSIS_PLY_MIN) continue;
 
-          // Rápida: só lances do próprio jogador (erros tipo A são erros do player, não do adversário)
-          if (ANALYSIS_MODE === "quick") {
-            const playerColor = game.color === "white" ? "w" : "b";
-            if (mv.color !== playerColor) continue;
-          }
+          // Rápida: só lances do próprio jogador (tipo A = erro do player, não do adversário)
+          // mv.color é "White"/"Black"; playerColorFull é "white"/"black"
+          if (ANALYSIS_MODE === "quick" && mv.color.toLowerCase() !== playerColorFull) continue;
 
           const cachedRow = cachedForGame[mv.ply];
           let analysis, cameFromDb = false;
@@ -1523,6 +1523,10 @@
             }
             catch (_) {}
           }
+
+          // Tipo A: jogador tinha tática disponível via best_move e não aproveitou
+          const isTypeA = tactical && tactical.source === "C" && mv.move_uci !== analysis.best_move;
+
           allAnalysis.push({
             game_index: gi + 1, game_url: game.url, date: game.date, color: game.color,
             opponent: game.opponent, ply: mv.ply, move_number: Math.ceil(mv.ply / 2),
@@ -1534,26 +1538,9 @@
             tactical_confidence: tactical ? tactical.confidence : "",
             tactical_source: tactical ? tactical.source : "",
             tactical_themes: tactical ? JSON.stringify(tactical.themes) : "",
+            tactical_role: isTypeA ? "A" : "",
+            _cameFromDb: cameFromDb,
           });
-
-          if (SERVER_MODE && !cameFromDb && analysis.best_move) {
-            pendingPostBuffer.push({
-              game_id: gameId, ply: mv.ply, side_to_move: mv.color,
-              move_san: mv.move_san, move_uci: mv.move_uci, fen_before: mv.fen_before,
-              depth: STOCKFISH_DEPTH,
-              evaluation: analysis.evaluation || null,
-              mate: analysis.mate ? String(analysis.mate) : null,
-              best_move: analysis.best_move || null, continuation: analysis.continuation || null,
-              tactical_theme: tactical ? tactical.theme : null,
-              tactical_confidence: tactical ? tactical.confidence : null,
-              tactical_source: tactical ? tactical.source : null,
-              tactical_themes: tactical ? JSON.stringify(tactical.themes) : null,
-            });
-            if (pendingPostBuffer.length >= POST_SAFETY_NET) {
-              try { await api("/api/analyses", { rows: pendingPostBuffer }); } catch (_) {}
-              pendingPostBuffer = [];
-            }
-          }
 
           if (analyzedPositions % 10 === 0) {
             removeCursor();
@@ -1564,9 +1551,46 @@
           }
         }
 
-        if (SERVER_MODE && pendingPostBuffer.length) {
-          try { await api("/api/analyses", { rows: pendingPostBuffer }); } catch (_) {}
-          pendingPostBuffer = [];
+        // ── B/C post-processing (Completo): erro punido/não-punido pelo adversário ──
+        if (ANALYSIS_MODE === "full") {
+          const gameEntries = allAnalysis.slice(gameAnalysisStartIdx);
+          for (let bi = 0; bi < gameEntries.length - 1; bi++) {
+            const cur = gameEntries[bi];
+            const nxt = gameEntries[bi + 1];
+            // Apenas lances do jogador seguidos de resposta consecutiva do adversário
+            if (cur.side_to_move.toLowerCase() !== playerColorFull) continue;
+            if (nxt.ply !== cur.ply + 1) continue;
+            // Adversário tinha tática concreta via best_move (fingerprint C)
+            if (nxt.tactical_source !== "C") continue;
+            const exploited = nxt.move_uci === nxt.best_move;
+            cur.tactical_role = (cur.tactical_role || "") + (exploited ? "B" : "C");
+          }
+        }
+
+        // ── Persist no DB (após B/C, numa única passagem por partida) ────────────
+        if (SERVER_MODE) {
+          for (const e of allAnalysis.slice(gameAnalysisStartIdx)) {
+            const hasBestMove = !!e.best_move && !e._cameFromDb;
+            const hasNewRole  = !!e.tactical_role;
+            if (!hasBestMove && !hasNewRole) continue;
+            pendingPostBuffer.push({
+              game_id: gameId, ply: e.ply, side_to_move: e.side_to_move,
+              move_san: e.move_san, move_uci: e.move_uci, fen_before: e.fen_before,
+              depth: e.depth,
+              evaluation: e.evaluation || null,
+              mate: e.mate ? String(e.mate) : null,
+              best_move: e.best_move || null, continuation: e.continuation || null,
+              tactical_theme: e.tactical_theme || null,
+              tactical_confidence: e.tactical_confidence || null,
+              tactical_source: e.tactical_source || null,
+              tactical_themes: e.tactical_themes || null,
+              tactical_role: e.tactical_role || null,
+            });
+          }
+          if (pendingPostBuffer.length) {
+            try { await api("/api/analyses", { rows: pendingPostBuffer }); } catch (_) {}
+            pendingPostBuffer = [];
+          }
         }
         job.resumeFromGame = gi + 1;
 
