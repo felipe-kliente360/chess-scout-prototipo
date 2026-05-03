@@ -208,7 +208,7 @@
         Análise
         <div style="display:flex;gap:14px;font-size:0.9em;padding:4px 0">
           <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
-            <input type="radio" name="analysis-mode" value="flash"> flash (abertura+tempo)
+            <input type="radio" name="analysis-mode" value="flash"> flash (200 · abertura+tempo)
           </label>
           <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
             <input type="radio" name="analysis-mode" value="quick" checked> rápida (30 · ply&gt;15 · 200ms)
@@ -470,14 +470,14 @@
     USERNAME = u;
     ANALYSIS_MODE = mode;
     if (mode === "flash") {
-      TARGET = 30; ANALYSIS_PLY_MIN = 0; MOVETIME_MS = null;
+      TARGET = 200; ANALYSIS_PLY_MIN = 0; MOVETIME_MS = null;
     } else if (mode === "quick") {
       TARGET = 30; ANALYSIS_PLY_MIN = 15; MOVETIME_MS = 200;
     } else {
       TARGET = 100; ANALYSIS_PLY_MIN = 0; MOVETIME_MS = null;
     }
     ENGINE = eng === "local" ? "local" : "api";
-    const modeLabel = mode === "flash" ? "30 partidas (flash)" :
+    const modeLabel = mode === "flash" ? "200 partidas (flash)" :
                       mode === "full"  ? "100 partidas (completa)" :
                                          "30 partidas (rápida)";
     const analysisDesc = mode === "flash" ? "sem engine · abertura+tempo" :
