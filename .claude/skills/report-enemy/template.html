@@ -15,7 +15,7 @@
 </style>
 </head>
 <body>
-{% from 'macros.html' import sample_warning, score_legend, phases_table, colors_table, time_class_table, openings_family_table, game_card, puzzle_program_block, head_to_head_table, references_list, evolution_block, time_analysis_block, cheat_signals_block, position_facts_block %}
+{% from 'macros.html' import sample_warning, score_legend, phases_table, colors_table, time_class_table, openings_family_table, game_card, puzzle_program_block, tactics_summary_table, head_to_head_table, references_list, evolution_block, time_analysis_block, cheat_signals_block, position_facts_block %}
 
 <div class="cover">
   <div class="icon">🎯</div>
@@ -31,26 +31,27 @@
 {{ score_legend('dele') }}
 
 <div class="section">
-  <h2>1. Perfil do adversário</h2>
-  {{ s.section_1_profile | nl2p | safe }}
-</div>
-
-<div class="section">
-  <h2>2. Onde ele é forte (evitar)</h2>
-  {{ s.section_2_strengths | nl2p | safe }}
+  <h2>Painel do adversário</h2>
+  {{ s.section_panel | nl2p | safe if s.section_panel else '' }}
+  <div class="kpi-grid">
+    <div class="kpi"><div class="v">{{ c.kpis.n_games }}</div><div class="l">Partidas</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.win_rate }}%</div><div class="l">Win-rate dele</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.score_10 }}/10</div><div class="l">Score geral</div></div>
+    <div class="kpi"><div class="v">{{ c.kpis.blunders }}</div><div class="l">Erros graves</div></div>
+    {% if c.eco_stats and c.eco_stats.avg_eco_ply %}
+    <div class="kpi"><div class="v">{{ c.eco_stats.avg_eco_ply }}</div><div class="l">Lances de teoria</div></div>
+    {% endif %}
+  </div>
+  <h3>Precisão por fase</h3>
   {{ phases_table(c.by_phase) }}
-</div>
-
-<div class="section">
-  <h2>3. Onde ele é vulnerável (atacar)</h2>
-  {{ s.section_3_weaknesses | nl2p | safe }}
-</div>
-
-<div class="section">
-  <h2>4. Repertório dele — o que ele joga</h2>
-  {{ s.section_4_repertoire | nl2p | safe }}
+  <h3>Por cor</h3>
+  {{ colors_table(c.by_color, color_label='Cor dele') }}
+  {% if c.by_time_class and c.by_time_class|length > 1 %}
+  <h3>Por ritmo de jogo</h3>
+  {{ time_class_table(c.by_time_class, score_label='Score dele', subtitle='Score em ritmos lentos não prediz performance em rápidos — escolha o ritmo da partida considerando isto.') }}
+  {% endif %}
   {% if c.openings_by_family and c.openings_by_family[0].name != 'Sem ECO' %}
-  <h3>Famílias mais frequentes</h3>
+  <h3>Repertório — famílias mais frequentes</h3>
   {{ openings_family_table(c.openings_by_family, headers={'name': 'Família', 'score': 'Score dele', 'theory': 'Lances de teoria'}) }}
   {% endif %}
   {% if c.openings_weak_spots %}
@@ -69,21 +70,50 @@
     </tbody>
   </table>
   {% endif %}
-</div>
-
-<div class="section">
-  <h2>5. Padrões por cor</h2>
-  {{ s.section_5_colors | nl2p | safe }}
-  {{ colors_table(c.by_color, color_label='Cor dele') }}
-  {% if c.by_time_class and c.by_time_class|length > 1 %}
-  <h3>Por ritmo de jogo (dele)</h3>
-  {{ time_class_table(c.by_time_class, score_label='Score dele', subtitle='Score em ritmos lentos não prediz performance em rápidos — escolha o ritmo da partida considerando isto.') }}
+  <h3>Erros táticos — resumo</h3>
+  {{ tactics_summary_table(c.kpis) }}
+  {% if c.position_facts_top and c.position_facts_top|length > 0 %}
+  <h3>Padrões posicionais</h3>
+  {{ position_facts_block(c.position_facts_top) }}
+  {% endif %}
+  <h3>Gestão de tempo</h3>
+  {{ time_analysis_block(c.time_analysis, my_pronoun='ele') }}
+  <h3>Histórico contra outros</h3>
+  {{ head_to_head_table(c.head_to_head) }}
+  {% if c.history and c.history|length >= 2 %}
+  <h3>Evolução ao longo dos ciclos</h3>
+  {{ evolution_block(c.history, c.evolution_charts) }}
   {% endif %}
 </div>
 
 <div class="section">
-  <h2>6. Como ele perde — padrões de derrota</h2>
-  {{ s.section_6_losing_patterns | nl2p | safe }}
+  <h2>1. Perfil do adversário</h2>
+  {{ s.section_1_profile | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>2. Abertura e desenvolvimento</h2>
+  {{ s.section_opening | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>3. Meio-jogo — táticas e estratégia</h2>
+  {{ s.section_midgame | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>4. Como ele conduz finais</h2>
+  {{ s.section_endgames | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>5. Padrões com brancas vs. pretas</h2>
+  {{ s.section_5_colors | nl2p | safe }}
+</div>
+
+<div class="section">
+  <h2>6. Gestão de tempo</h2>
+  {{ s.section_time_management | nl2p | safe }}
 </div>
 
 <div class="section">
@@ -99,65 +129,36 @@
   {% endfor %}
 </div>
 
-{% if c.position_facts_top and c.position_facts_top|length > 0 %}
 <div class="section">
-  <h2>8. Análise posicional / temas estratégicos</h2>
-  {{ s.section_positional | nl2p | safe if s.section_positional else '' }}
-  {{ position_facts_block(c.position_facts_top) }}
-</div>
-{% endif %}
-
-<div class="section">
-  <h2>9. Números do adversário</h2>
-  <div class="kpi-grid">
-    <div class="kpi"><div class="v">{{ c.kpis.n_games }}</div><div class="l">Partidas</div></div>
-    <div class="kpi"><div class="v">{{ c.kpis.win_rate }}%</div><div class="l">Win-rate</div></div>
-    <div class="kpi"><div class="v">{{ c.kpis.score_10 }}/10</div><div class="l">Score geral</div></div>
-    <div class="kpi"><div class="v">{{ c.kpis.blunders }}</div><div class="l">Erros graves</div></div>
-    {% if c.eco_stats and c.eco_stats.avg_eco_ply %}
-    <div class="kpi"><div class="v">{{ c.eco_stats.avg_eco_ply }}</div><div class="l">Lances de teoria</div></div>
-    {% endif %}
-  </div>
-  <h3>Histórico contra outros</h3>
-  {{ head_to_head_table(c.head_to_head) }}
-
-  {% if c.history and c.history|length >= 2 %}
-  <h3>Evolução dele ao longo dos ciclos</h3>
-  {{ evolution_block(c.history, c.evolution_charts) }}
-  {% endif %}
+  <h2>8. O que evitar — onde ele é forte</h2>
+  {{ s.section_2_strengths | nl2p | safe }}
 </div>
 
 <div class="section">
-  <h2>10. Gestão de tempo dele</h2>
-  {{ s.section_time_management | nl2p | safe }}
-  {{ time_analysis_block(c.time_analysis, my_pronoun='ele') }}
+  <h2>9. Como atacar — fraquezas a explorar</h2>
+  {{ s.section_3_weaknesses | nl2p | safe }}
 </div>
 
 <div class="section">
-  <h2>11. Plano de combate</h2>
-  {{ s.section_9_battleplan | nl2p | safe }}
-</div>
-
-<div class="section">
-  <h2>12. Armadilhas e padrões para induzir</h2>
+  <h2>10. Armadilhas e padrões a induzir</h2>
   {{ s.section_10_traps | nl2p | safe }}
 </div>
 
 <div class="section">
-  <h2>13. Programa de treino — você contra ele</h2>
+  <h2>11. Programa de treino contra ele</h2>
   {{ puzzle_program_block(c.puzzle_program, s.section_puzzle_program) }}
 </div>
 
 {% if c.cheat_signals and c.cheat_signals.available %}
 <div class="section">
-  <h2>14. Sinais de assistência computacional (do adversário)</h2>
+  <h2>Apêndice — Sinais de assistência computacional</h2>
   {{ s.section_cheat_signals | nl2p | safe if s.section_cheat_signals else '' }}
   {{ cheat_signals_block(c.cheat_signals) }}
 </div>
 {% endif %}
 
 <div class="section">
-  <h2>15. Partidas-chave (5 melhores vitórias dele + 5 piores derrotas dele)</h2>
+  <h2>Partidas-chave (5 melhores vitórias dele + 5 piores derrotas dele)</h2>
   {{ references_list(c.references) }}
 </div>
 

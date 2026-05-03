@@ -68,62 +68,65 @@ Saída JSON traz:
 
 Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cacheadas + regeneradas). Salvar como `data/<username>_<stamp>_enemy_sections.json`. Economia de tokens: ~10× menos quando muda pouco.
 
-### 3. Redigir as 11 seções
+### 3. Redigir as seções
 
 | # | Título no PDF | Chave JSON |
 |---|---|---|
+| Painel | Painel do adversário | `section_panel` (opcional) |
 | 1 | Perfil do adversário | `section_1_profile` |
-| 2 | Onde ele é forte (evitar) | `section_2_strengths` |
-| 3 | Onde ele é vulnerável (atacar) | `section_3_weaknesses` |
-| 4 | Repertório dele — o que ele joga | `section_4_repertoire` |
-| 5 | Padrões por cor | `section_5_colors` |
-| 6 | Como ele perde — padrões de derrota | `section_6_losing_patterns` |
-| 7 | Partidas de referência | `paradigmatic_narratives.game_<N>` |
-| 8 | Análise posicional / temas estratégicos | `section_positional` |
-| 9 | Números do adversário | (tabelas automáticas) |
-| 10 | Gestão de tempo dele | `section_time_management` |
-| 11 | Plano de combate | `section_9_battleplan` |
-| 12 | Armadilhas e padrões para induzir | `section_10_traps` |
-| 13 | Programa de treino — você contra ele | `section_puzzle_program` (opcional) |
+| 2 | Abertura e desenvolvimento | `section_opening` |
+| 3 | Meio-jogo — táticas e estratégia | `section_midgame` |
+| 4 | Como ele conduz finais | `section_endgames` |
+| 5 | Padrões com brancas vs. pretas | `section_5_colors` |
+| 6 | Gestão de tempo | `section_time_management` |
+| 7 | Partidas mais relevantes | `paradigmatic_narratives.game_<N>` |
+| 8 | O que evitar — onde ele é forte | `section_2_strengths` |
+| 9 | Como atacar — fraquezas a explorar | `section_3_weaknesses` |
+| 10 | Armadilhas e padrões a induzir | `section_10_traps` |
+| 11 | Programa de treino contra ele | `section_puzzle_program` (opcional) |
 
-**Seção 3 (vulnerabilidades táticas) — use `tactical_profile` do adversário:**
+**Painel (section_panel) — opcional:** 2–3 frases que orientam antes das tabelas. Ex: "Score 5,8/10 com colapso evidente no meio-jogo — a maior alavanca para te vencer. As seções seguintes detalham como explorar cada fraqueza."
+
+**Seção 2 (abertura e desenvolvimento) — section_opening:** use `c.openings_by_family`, `c.eco_stats.avg_eco_ply`, `c.openings_weak_spots` e `c.by_phase`. Cubra: (a) o que ele joga e com que profundidade — se `avg_eco_ply` baixo, improvisa cedo (atacar com linha forçada); se alto, conhece teoria (sair do livro com transposições); (b) famílias onde ele perde mais = armas a induzir; (c) como a escolha de abertura dele configura o meio-jogo que você quer ou quer evitar.
+
+**Seção 3 (meio-jogo) — section_midgame:** integra táticas + padrões posicionais em texto único com foco operacional. Use `c.kpis.tactical_profile` e `c.position_facts_top`. Cubra: (a) temas táticos onde ele erra mais — **Papel B** (erros que criam oportunidades imediatas) são prioridade; (b) padrões posicionais fracos (win_rate baixo quando presente) = estruturas a forçar; (c) como os dois se conectam num plano concreto de como pressionar. Score do meio-jogo vs. outras fases.
 
 `c.kpis.tactical_profile` expõe os padrões táticos dele:
-- `weighted_top`: top-5 temas ponderados por papel×modalidade. **Papel B** (adversário aproveitou erro dele) = fragilidades reais — são os temas a induzir. **Papel C** (adversário não aproveitou) = situações em que ele perdoa oponentes — indique que você vai aproveitar quando aparecer.
-- `role_totals.B` alto: os erros dele frequentemente criam oportunidades imediatas — ataque com posições táticas abertas.
-- `clock_tactics.pressure_blunder_ratio` > 2.0: sob pressão de relógio ele colapsa taticamente — jogue partidas longas com reserva de tempo no final; force complicações no terço final.
-- `clock_tactics.under_pressure.themes_top3`: quais temas aparecem quando o relógio está baixo — esses são os erros a provocar no final da partida.
-- `trend_lines`: temas com `delta > 0` estão piorando (ele está errando mais neles). Themes com `delta < 0` estão melhorando (evitar contar com eles se estiver em queda recente).
-- `tactical_confidence.level`: `"alta"` / `"média"` / `"baixa"` / `"insuficiente"`. Se `level ≠ "alta"`, adicione nota em §3 antes da lista de vulnerabilidades: "Confiança tática [nível] — [note]". Se `"insuficiente"`, não cite temas específicos; diga apenas que a amostra é dominada por bullet/daily e a análise tática é inconclusiva.
+- `weighted_top`: top-5 temas ponderados. Papel B = fragilidades reais a induzir. Papel C = situações em que ele perdoa — você vai aproveitar.
+- `role_totals.B` alto: erros criam oportunidades imediatas — jogue posições táticas abertas.
+- `clock_tactics.pressure_blunder_ratio` > 2.0: ele colapsa sob pressão — force complicações no terço final.
+- `clock_tactics.under_pressure.themes_top3`: erros a provocar quando o relógio dele está baixo.
+- `trend_lines`: temas com `delta > 0` piorando — prioridade. `delta < 0` melhorando — não contar com eles.
+- `tactical_confidence.level`: se ≠ `"alta"`, adicione nota antes da narrativa. Se `"insuficiente"`, não cite temas específicos.
 
-Nomes de tema seguem taxonomia Lichess (`fork`, `pin`, `discoveredAttack`, `backRankMate`, `capturingDefender`, `intermezzo`, `kingsideAttack`, etc.) — use rótulos PT-BR no texto.
+**Seção 4 (finais) — section_endgames:** use `c.by_phase` (score da fase final dele). Cubra: (a) score no final vs. outras fases — se for pior, é onde você quer chegar; (b) tipos de final onde ele mais erra; (c) instrução concreta (ex: "force troca de damas no lance 20–25 para chegarm num final de torres onde ele tem score 6,8").
 
-**Seção 4 (repertório) — específico:** use `c.openings_by_family` para listar o que ele mais joga; `c.openings_weak_spots` para identificar famílias onde ele perde — essas são as armas a induzir. Citar `c.eco_stats.avg_eco_ply`: se baixo, ele improvisa cedo (atacar com linha forçada); se alto, conhece teoria (sair do livro com transposições laterais).
+**Seção 5 (por cor) — section_5_colors:** texto puro, sem tabelas (já no painel). Cubra: (a) assimetria dele — ele joga melhor com uma cor? (b) implicação para você: se ele é fraco com pretas numa família, jogar 1.e4/1.d4 para forçar essa situação.
 
-**Seção 8 (análise posicional dele) — específico:** use `c.position_facts_top`. A tabela já é renderizada automaticamente. Você escreve `section_positional` (1–2 parágrafos): (a) qual padrão estrutural ele usa mais (ex: "ele joga frequentemente com o rei no centro — em 12 partidas, win-rate de 38% quando presente — explorar essa vulnerabilidade"), (b) o que os padrões revelam sobre o estilo dele (abertura favorita, tendência posicional), (c) 1 instrução de combate vinculada ao padrão mais fraco dele (win_rate mais baixo). Se `position_facts_top` estiver vazio, pule — seção não aparece no PDF.
+**Seção 6 (gestão de tempo) — section_time_management:** texto puro. Use `c.time_analysis`. Foco na exploração tática: (a) onde ele afoga ou desliga no relógio; (b) `time_pressure.blunder_rate_ratio` > 1.5 = ele desmonta sob pressão — acelere e force complicações no terço final; (c) "pensou e errou" = viés do otimismo dele, atacar com refutações concretas; (d) "errou rápido" = premove, induzir sequências forçadas. Encerre com 1 instrução tática concreta. Se `available=false`, pule.
 
-**Seção 10 (gestão de tempo dele) — específico:** use `c.time_analysis`. Foque na exploração tática: (a) como ele administra o relógio (mediana por fase) — onde ele "afoga" ou "desliga"; (b) leitura de `time_pressure.blunder_rate_ratio`: razão >1.5 indica que ele desmonta sob pressão (acelere; force trocas/complicações no terço final); (c) padrão de "pensou e errou" (top `long_think_blunders`) — viés do otimismo dele em cálculo longo, atacar com posições onde refutação é concreta; (d) "errou rápido" (top `fast_blunders`) — premove ou reflexo, induzir lances forçados em sequência. Encerre com 1 instrução tática (ex: "complique no lance 25–35 — é onde a curva de erro dele dispara em pressão"). Se `available=false`, pule.
+**Seção 9 (como atacar) — section_3_weaknesses:** 4–6 instruções táticas operacionais. Ex: "Com brancas, jogue 1.d4 para forçá-lo na família Y onde tem 25% de win-rate." "Force trocas no meio-jogo (score 9,5 dele); pressione no final (score 7,2)." Sem "considere" ou "talvez" — é plano, não sugestão.
 
-**Seção 10 (plano de combate) — específico:** 4–6 instruções táticas concretas, ex:
-1. "Com brancas, jogue X (1.d4 ou 1.c4) para forçá-lo na família Y onde ele tem 25% de win-rate."
-2. "Evite estruturas Z; ele tem score 9,8 nelas."
-3. "Force trocas se a fase for meio-jogo (score 9,5 dele); pressione tecnicamente no final (score 7,8 dele)."
-4. "Em partidas longas, ele desliga depois do lance 40 — joga com tempo extra."
+**Seção 10 (armadilhas) — section_10_traps:** 2–3 padrões táticos repetidos que você pode induzir com base nas paradigmáticas. Cite o motivo tático canônico a induzir (sacrifício grego, zwischenzug, espeto na coluna aberta).
 
-**Seção 10 (armadilhas) — específico:** 2–3 padrões táticos repetidos que você pode induzir baseado nas partidas paradigmáticas. Ex: "Nas 3 derrotas vs adversários ≥1400, ele falhou em transição abertura→meio-jogo — força trocas no lance 12–15 com peão central avançado."
-
-**Seção 11 (programa de puzzles) — específico:** o `compute.py` injeta `c.puzzle_program` automaticamente. Aqui o `suggested_rating` representa o **rating estimado dele** (não seu) — você treina puzzles nessa faixa e nesses temas para entender o que ele resolve e o que ele falha em ver. Temas com `source="detected"` vêm das partidas reais dele — são as fraquezas concretas a explorar. **Os nomes em `puzzle_program.themes[].theme` são camelCase Lichess exato** — compatíveis com o Woodpecker para montar sessões de treino. Você pode opcionalmente escrever `section_puzzle_program` em sections.json (1–2 parágrafos): por que esses temas são os que ele cai/explora, e como integrar com o app de treino tático.
+**Seção 11 (programa de puzzles) — section_puzzle_program:** `suggested_rating` = rating estimado dele — você treina nessa faixa para entender o que ele falha em ver. Temas `source="detected"` = fraquezas concretas das partidas reais dele. Opcional: 1–2 parágrafos explicando como usar no Woodpecker.
 
 Salvar como `data/<username>_<timestamp>_enemy_sections.json`:
 
 ```json
 {
-  "section_1_profile": "...", "section_2_strengths": "...", "section_3_weaknesses": "...",
-  "section_4_repertoire": "...", "section_5_colors": "...", "section_6_losing_patterns": "...",
-  "paradigmatic_narratives": { "game_<N>": "..." },
-  "section_positional": "...",
+  "section_panel": "...",
+  "section_1_profile": "...",
+  "section_opening": "...",
+  "section_midgame": "...",
+  "section_endgames": "...",
+  "section_5_colors": "...",
   "section_time_management": "...",
-  "section_9_battleplan": "...", "section_10_traps": "..."
+  "paradigmatic_narratives": { "game_<N>": "..." },
+  "section_2_strengths": "...",
+  "section_3_weaknesses": "...",
+  "section_10_traps": "...",
+  "section_puzzle_program": "..."
 }
 ```
 

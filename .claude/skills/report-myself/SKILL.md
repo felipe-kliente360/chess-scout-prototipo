@@ -81,66 +81,64 @@ Saída JSON traz:
 
 Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cacheadas + regeneradas). Salvar o arquivo no formato esperado por build.py: `data/<username>_<stamp>_myself_sections.json`. Economia de tokens: ~10× menos quando muda pouco.
 
-### 3. Redigir as 12 seções
+### 3. Redigir as seções
 
 | # | Título no PDF | Chave JSON |
 |---|---|---|
-| 1 | Onde você está hoje | `section_1_intro` |
-| 2 | Precisão por fase | `section_2_phases` |
-| 3 | Padrões por cor | `section_3_colors` |
-| 4 | Erros táticos: onde e por quê | `section_4_tactics` |
-| 5 | Aberturas e repertório | `section_5_openings` |
-| 6 | Como conduz finais | `section_6_endgames` |
-| 7 | Partidas que definem o momento (4 partidas: 2 melhores vitórias + 2 piores derrotas) | `paradigmatic_narratives.game_<N>` |
-| 8 | Análise posicional / temas estratégicos | `section_positional` |
-| 9 | Números do ciclo | (tabelas automáticas) |
-| 10 | Gestão de tempo | `section_time_management` |
-| 11 | Pontos fortes e fracos | `section_9_strengths` |
-| 12 | Como adversários podem te vencer | `section_10_opponents` |
-| 13 | Plano de estudo — próximos 30 dias | `section_11_plan` |
-| 14 | Programa de treino de puzzles | `section_puzzle_program` (opcional) |
+| Painel | Painel do jogador | `section_panel` (opcional) |
+| 1 | Situação geral | `section_1_intro` |
+| 2 | Abertura e desenvolvimento | `section_opening` |
+| 3 | Meio-jogo — táticas e estratégia | `section_midgame` |
+| 4 | Como conduz finais | `section_endgames` |
+| 5 | Padrões por cor | `section_3_colors` |
+| 6 | Gestão de tempo | `section_time_management` |
+| 7 | Partidas mais relevantes | `paradigmatic_narratives.game_<N>` |
+| 8 | Pontos fortes e fracos | `section_9_strengths` |
+| 9 | Como adversários podem te vencer | `section_10_opponents` |
+| 10 | Plano de estudo — 30 dias + puzzles | `section_11_plan` + `section_puzzle_program` |
 
-**Seção 5 (aberturas) — específico:** use `c.openings_by_family` para descrever famílias dominantes; `c.eco_stats.avg_eco_ply` para profundidade média de teoria; `c.openings_weak_spots` para alvos de estudo. Veja faixas em `theory.md` seção 5b.
+**Painel (section_panel) — opcional:** 2–3 frases que orientam o leitor antes das tabelas. Ex: "Seu score de 6,2/10 concentra a divergência no meio-jogo — é onde estão 68% dos erros graves. As seções seguintes detalham cada bloco." Se omitido, o painel abre diretamente nos KPIs.
 
-**Seção 4 (erros táticos) — use `tactical_profile` completo:**
+**Seção 2 (abertura e desenvolvimento) — section_opening:** use `c.openings_by_family`, `c.eco_stats.avg_eco_ply`, `c.openings_weak_spots` e `c.by_phase` (score da fase abertura). Cubra: (a) o que você joga e com que profundidade de teoria — se `avg_eco_ply` baixo, você improvisa cedo; (b) onde você performa bem/mal na abertura (win-rate por família); (c) como a escolha de abertura afeta a transição para o meio-jogo. Veja faixas em `theory.md` seção 5b.
+
+**Seção 3 (meio-jogo) — section_midgame:** integra táticas + padrões posicionais num único texto narrativo. Use `c.kpis.tactical_profile` e `c.position_facts_top`. Cubra: (a) temas táticos recorrentes — cite pelo nome canônico (espeto, garfo, descoberto, zwischenzug); (b) papel dominante A/B/C com implicação prática; (c) padrões posicionais que aparecem nas partidas (IQP, escudo quebrado, etc.) e como se conectam com os erros táticos; (d) score do meio-jogo vs. outras fases.
 
 `c.kpis.tactical_profile` expõe:
-- `weighted_top`: top-5 temas ponderados por papel×modalidade (pontuação, não contagem). Os **nomes de tema seguem taxonomia Lichess exata** (`fork`, `pin`, `discoveredAttack`, `backRankMate`, `capturingDefender`, etc.) — use os rótulos PT-BR de `CANONICAL_THEMES` no texto.
-- `role_totals.A/B/C`: soma de peso por papel. Papel A = jogador não viu o motivo (cegueira tática). Papel B = erro gerou oportunidade aproveitada pelo adversário. Papel C = adversário perdoou.
-- `by_time_class`: top-3 temas por modalidade (rapid / blitz).
-- `clock_tactics.pressure_blunder_ratio`: razão de erros táticos sob pressão de relógio vs. normal. Se > 2.0 = degradação severa; mencionar explicitamente em §4 ou §9.
-- `clock_tactics.under_pressure.themes_top3`: quais temas aparecem quando o relógio está baixo.
-- `trend_lines`: deltas entre os dois períodos mais recentes (YYYY-MM) — identifica temas em ascensão (delta > 0) vs. em declínio. Use para calibrar progresso na Seção 11.
-- `tactical_confidence`: metadado de qualidade da amostra tática.
-  - `level`: `"alta"` (≥15 rapid+blitz), `"média"` (8–14), `"baixa"` (<8, bullet pode ter sido incluído), `"insuficiente"` (sem rapid/blitz/bullet).
-  - `n_rapid_blitz`: partidas que contribuíram com peso normal.
-  - `weights_adapted`: `true` se bullet foi incluído com peso 0.4 por fallback.
-  - `note`: texto explicativo pronto para citar no PDF.
-  - **Regra de exibição**: se `level ≠ "alta"`, adicione nota explícita antes da narrativa de §4 — use o texto de `note` como base. Não invente confiança que o dado não sustenta. Se `level = "insuficiente"`, escreva apenas "Análise tática indisponível — amostra sem partidas rapid/blitz." e pule os temas.
+- `weighted_top`: top-5 temas ponderados por papel×modalidade. Nomes seguem taxonomia Lichess exata (`fork`, `pin`, `discoveredAttack`, etc.) — use rótulos PT-BR no texto.
+- `role_totals.A/B/C`: Papel A = não viu o motivo. Papel B = erro criou oportunidade que adversário aproveitou. Papel C = adversário perdoou.
+- `clock_tactics.pressure_blunder_ratio`: se > 2.0, degradação severa sob pressão — mencionar em §3 e §6.
+- `trend_lines`: deltas por período — use em §10 para calibrar progresso.
+- `tactical_confidence.level`: se ≠ `"alta"`, adicione nota antes da narrativa. Se `"insuficiente"`, escreva só "Análise tática indisponível — amostra sem partidas rapid/blitz."
 
-Narrativa por papel (§4):
-- Papel A dominante: "Você **não está vendo** o motivo quando ele está disponível — trabalhar recognition de padrões visuais."
-- Papel B dominante: "Seus erros **criam oportunidades** que o adversário aproveita — melhora na posição antes do lance."
-- Papel C dominante: "Adversários frequentemente **perdonam** táticas disponíveis — seu nível é sólido, mas o adversário ainda erra mais."
+Narrativa por papel:
+- A dominante: "Você não está vendo o motivo quando disponível — trabalhar recognition de padrões."
+- B dominante: "Seus erros criam oportunidades que o adversário aproveita — melhorar posição antes do lance."
+- C dominante: "Adversários frequentemente perdoam táticas disponíveis — nível sólido, adversário ainda erra mais."
 
-**Seção 8 (análise posicional) — específico:** use `c.position_facts_top` (top-15 padrões estruturais com `label`, `n`, `win_rate_when_present`). A tabela já é renderizada automaticamente pelo macro `position_facts_block`. Você escreve `section_positional` (1–2 parágrafos): (a) qual padrão estrutural domina (ex: "você frequentemente joga com IQP — em 18 partidas, win-rate de 61% quando presente"), (b) o que os padrões recorrentes revelam sobre seu estilo (fechado/aberto, reativo/proativo), (c) 1 recomendação de estudo vinculada ao padrão mais fraco (win_rate mais baixo). Se `position_facts_top` estiver vazio ou ausente (análise completa não rodou), pule a seção — ela não aparece no PDF.
+**Seção 4 (finais) — section_endgames:** use `c.by_phase` (score e erros na fase final). Cubra: (a) score no final vs. abertura e meio-jogo — se for o ponto mais fraco, nomeie isso claramente; (b) padrões de erro característicos (prematura troca de peças, finais de torre, oposição); (c) recomendação específica (Lucena/Philidor/oposição se aplicável). Cite Capablanca ou Dvoretsky quando ancorar recomendação de finais.
 
-**Seção 10 (gestão de tempo) — específico:** use `c.time_analysis` (se `available=true`). Tabelas e KPIs já são renderizados pelo macro `time_analysis_block`; você escreve `section_time_management` (1–2 parágrafos) cobrindo: (a) padrão geral de uso de tempo (mediana por fase, onde gasta mais), (b) o que a pressão de relógio (`time_pressure.blunder_rate_ratio`) revela — degradação real vs. neutra, (c) leitura de "pensou e errou" (cálculo longo que falhou — viés de otimismo / cegueira tática) e "errou rápido" (premove ou impulso). Termine com 1 frase prática (ex: "regule o relógio na transição abertura→meio-jogo: 65% dos seus erros graves vêm de decisões em &lt;3s lá"). Se `available=false`, pule a seção (template já mostra mensagem apropriada). Veja §22 do theory.md para guia conceitual.
+**Seção 5 (por cor) — section_3_colors:** texto puro, sem tabelas (já no painel). Referencie os dados do painel. Cubra: (a) assimetria de performance brancas vs. pretas; (b) se a diferença vem de abertura ou de fase posterior; (c) implicação para escolha de repertório.
 
-**Seção 11 (plano) — específico:** 3–5 prescrições priorizadas por retorno/tempo. Categoria fixa "primeiro estudar finais clássicos se for o ponto fraco" (Lucena/Philidor/oposição), depois repertório, depois cobertura ECO/depth se baixo. Calibre pelo `confidence_pct`. Use `tactical_profile.trend_lines` para indicar progresso vs. persistência de fraqueza.
+**Seção 6 (gestão de tempo) — section_time_management:** texto puro, sem blocos inline (time_analysis_block já no painel). Use `c.time_analysis` (se `available=true`). Cubra: (a) onde gasta mais tempo por fase — onde "afoga"; (b) `time_pressure.blunder_rate_ratio`: degradação real vs. neutra sob pressão; (c) "pensou e errou" (cálculo longo que falhou — viés de otimismo) vs. "errou rápido" (impulso/premove). Termine com 1 frase prática concreta. Se `available=false`, pule. Ver §22 do theory.md.
 
-**Seção 12 (programa de puzzles) — específico:** o `compute.py` já injeta `c.puzzle_program` com `suggested_rating`, `rating_range`, `themes` (alta/média prioridade, com `rationale` e `source`). Temas com `source="detected"` vêm das partidas reais do jogador e têm prioridade mais alta. **Os nomes de tema em `puzzle_program.themes[].theme` são camelCase exato da taxonomia Lichess** (ex: `fork`, `pin`, `discoveredAttack`) — o app Woodpecker os consome diretamente para montar conjuntos de treino. O template renderiza tabela automática. Você pode opcionalmente escrever `section_puzzle_program` em sections.json (1–2 parágrafos): por que esses temas, como combinar com Plano 30 dias da seção 11, e como usar como input no Woodpecker.
+**Seção 10 (plano) — section_11_plan:** 3–5 prescrições priorizadas por retorno/tempo. Fixar "finais clássicos primeiro se for o ponto fraco" (Lucena/Philidor/oposição), depois repertório, depois cobertura ECO/depth se baixo. Use `tactical_profile.trend_lines` para indicar progresso vs. persistência. O `puzzle_program_block` é renderizado automaticamente após o texto — você pode escrever `section_puzzle_program` (1–2 parágrafos) explicando por que esses temas e como usar no Woodpecker.
 
 Salvar como `data/<username>_<timestamp>_myself_sections.json`:
 
 ```json
 {
-  "section_1_intro": "...", "section_2_phases": "...", "section_3_colors": "...",
-  "section_4_tactics": "...", "section_5_openings": "...", "section_6_endgames": "...",
-  "paradigmatic_narratives": { "game_<N>": "..." },
-  "section_positional": "...",
+  "section_panel": "...",
+  "section_1_intro": "...",
+  "section_opening": "...",
+  "section_midgame": "...",
+  "section_endgames": "...",
+  "section_3_colors": "...",
   "section_time_management": "...",
-  "section_9_strengths": "...", "section_10_opponents": "...", "section_11_plan": "..."
+  "paradigmatic_narratives": { "game_<N>": "..." },
+  "section_9_strengths": "...",
+  "section_10_opponents": "...",
+  "section_11_plan": "...",
+  "section_puzzle_program": "..."
 }
 ```
 

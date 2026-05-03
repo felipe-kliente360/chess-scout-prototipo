@@ -41,15 +41,14 @@ Devolva **APENAS** um objeto JSON válido, sem prefixo, sem sufixo, sem markdown
 
 ```json
 {
+  "section_panel": "...",
   "section_1_intro": "...",
-  "section_2_phases": "...",
+  "section_opening": "...",
+  "section_midgame": "...",
+  "section_endgames": "...",
   "section_3_colors": "...",
-  "section_4_tactics": "...",
-  "section_5_openings": "...",
-  "section_6_endgames": "...",
-  "paradigmatic_narratives": { "game_1": "...", "game_2": "...", "game_3": "...", "game_4": "..." },
-  "section_positional": "...",
   "section_time_management": "...",
+  "paradigmatic_narratives": { "game_1": "...", "game_2": "...", "game_3": "...", "game_4": "..." },
   "section_9_strengths": "...",
   "section_10_opponents": "...",
   "section_11_plan": "...",
@@ -62,16 +61,16 @@ Devolva **APENAS** um objeto JSON válido, sem prefixo, sem sufixo, sem markdown
 
 ```json
 {
+  "section_panel": "...",
   "section_1_profile": "...",
+  "section_opening": "...",
+  "section_midgame": "...",
+  "section_endgames": "...",
+  "section_5_colors": "...",
+  "section_time_management": "...",
+  "paradigmatic_narratives": { "game_1": "...", "game_2": "...", "game_3": "...", "game_4": "..." },
   "section_2_strengths": "...",
   "section_3_weaknesses": "...",
-  "section_4_repertoire": "...",
-  "section_5_colors": "...",
-  "section_6_losing_patterns": "...",
-  "paradigmatic_narratives": { "game_1": "...", "game_2": "...", "game_3": "...", "game_4": "..." },
-  "section_positional": "...",
-  "section_time_management": "...",
-  "section_9_battleplan": "...",
   "section_10_traps": "...",
   "section_puzzle_program": "...",
   "section_cheat_signals": "..."
@@ -98,18 +97,24 @@ Devolva **APENAS** um objeto JSON válido, sem prefixo, sem sufixo, sem markdown
 
 ### myself (jogador analisando-se)
 - Voz: 2ª pessoa ("você joga", "você perde quando").
-- Seção 1 começa pela situação concreta (rating + win-rate), explica o score em 1 frase.
-- Seção 4 (táticas) deve nomear o motivo dominante (pin, fork, trappedPiece) e dizer o que isso revela.
-- Seção 11 (plano): 3–5 prescrições priorizadas por retorno/tempo.
-- Seção 12 (puzzles, opcional): 1–2 parágrafos sobre temas + como combinar com o plano.
-- Seção 13 (cheat_signals, opcional): só escreva se `c.cheat_signals.overall_level != 'green'`. Se yellow/red, contextualize 1 parágrafo da auto-checagem honesta. Se green, devolva string vazia.
+- section_panel (opcional): 2–3 frases orientando o leitor antes das tabelas.
+- section_1_intro: começa pela situação concreta (rating + win-rate), explica o score em 1 frase.
+- section_opening: repertório + profundidade de teoria + como a abertura configura o jogo.
+- section_midgame: integra táticas (papel A/B/C + motivos canônicos) + padrões posicionais (position_facts) num texto único.
+- section_endgames: score no final vs. outras fases + padrões de erro + recomendação específica.
+- section_11_plan: 3–5 prescrições priorizadas por retorno/tempo. section_puzzle_program (opcional): 1–2 parágrafos sobre temas + Woodpecker.
+- section_cheat_signals (opcional): só escreva se `c.cheat_signals.overall_level != 'green'`. Se yellow/red, 1 parágrafo de auto-checagem honesta. Se green, string vazia.
 
 ### enemy (preparação contra adversário)
 - Voz: 3ª pessoa ("ele joga", "ele perde quando").
-- Operacional: cada recomendação concreta. "Jogue X com brancas", não "considere X".
-- Seção 9 (plano de combate): 4–6 instruções táticas concretas.
-- Seção 10 (armadilhas): 2–3 padrões para induzir baseados nas paradigmáticas.
-- Seção 13 (cheat_signals, opcional): só escreva se overall != green. Tom factual: "padrões observados que destoam — relevante para escolher ritmo / preparação".
+- section_panel (opcional): 2–3 frases orientando antes das tabelas.
+- section_opening: o que ele joga + onde improvisa + armas a induzir (openings_weak_spots).
+- section_midgame: integra táticas (Papel B = fragilidades reais) + padrões posicionais fracos dele num texto operacional.
+- section_endgames: se ele é fraco em finais, instrução concreta de como chegar lá.
+- section_2_strengths (§8 O que evitar): onde não entrar com ele.
+- section_3_weaknesses (§9 Como atacar): 4–6 instruções táticas concretas. Sem "considere" — é plano.
+- section_10_traps: 2–3 padrões táticos a induzir com base nas paradigmáticas.
+- section_cheat_signals (opcional): só escreva se overall != green. Tom factual: "padrões observados que destoam — relevante para escolher ritmo / preparação".
 
 ### coach (treinador→aluno)
 - Voz: "o aluno", "para a próxima aula prescreva...", implicando leitor é o treinador.
