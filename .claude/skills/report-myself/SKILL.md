@@ -81,7 +81,7 @@ Saída JSON traz:
 
 Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cacheadas + regeneradas). Salvar o arquivo no formato esperado por build.py: `data/<username>_<stamp>_myself_sections.json`. Economia de tokens: ~10× menos quando muda pouco.
 
-### 3. Redigir as 11 seções
+### 3. Redigir as 12 seções
 
 | # | Título no PDF | Chave JSON |
 |---|---|---|
@@ -92,12 +92,13 @@ Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cache
 | 5 | Aberturas e repertório | `section_5_openings` |
 | 6 | Como conduz finais | `section_6_endgames` |
 | 7 | Partidas que definem o momento (4 partidas: 2 melhores vitórias + 2 piores derrotas) | `paradigmatic_narratives.game_<N>` |
-| 8 | Números do ciclo | (tabelas automáticas) |
-| 9 | Gestão de tempo | `section_time_management` |
-| 10 | Pontos fortes e fracos | `section_9_strengths` |
-| 11 | Como adversários podem te vencer | `section_10_opponents` |
-| 12 | Plano de estudo — próximos 30 dias | `section_11_plan` |
-| 13 | Programa de treino de puzzles | `section_puzzle_program` (opcional) |
+| 8 | Análise posicional / temas estratégicos | `section_positional` |
+| 9 | Números do ciclo | (tabelas automáticas) |
+| 10 | Gestão de tempo | `section_time_management` |
+| 11 | Pontos fortes e fracos | `section_9_strengths` |
+| 12 | Como adversários podem te vencer | `section_10_opponents` |
+| 13 | Plano de estudo — próximos 30 dias | `section_11_plan` |
+| 14 | Programa de treino de puzzles | `section_puzzle_program` (opcional) |
 
 **Seção 5 (aberturas) — específico:** use `c.openings_by_family` para descrever famílias dominantes; `c.eco_stats.avg_eco_ply` para profundidade média de teoria; `c.openings_weak_spots` para alvos de estudo. Veja faixas em `theory.md` seção 5b.
 
@@ -122,7 +123,9 @@ Narrativa por papel (§4):
 - Papel B dominante: "Seus erros **criam oportunidades** que o adversário aproveita — melhora na posição antes do lance."
 - Papel C dominante: "Adversários frequentemente **perdonam** táticas disponíveis — seu nível é sólido, mas o adversário ainda erra mais."
 
-**Seção 9 (gestão de tempo) — específico:** use `c.time_analysis` (se `available=true`). Tabelas e KPIs já são renderizados pelo macro `time_analysis_block`; você escreve `section_time_management` (1–2 parágrafos) cobrindo: (a) padrão geral de uso de tempo (mediana por fase, onde gasta mais), (b) o que a pressão de relógio (`time_pressure.blunder_rate_ratio`) revela — degradação real vs. neutra, (c) leitura de "pensou e errou" (cálculo longo que falhou — viés de otimismo / cegueira tática) e "errou rápido" (premove ou impulso). Termine com 1 frase prática (ex: "regule o relógio na transição abertura→meio-jogo: 65% dos seus erros graves vêm de decisões em &lt;3s lá"). Se `available=false`, pule a seção (template já mostra mensagem apropriada). Veja §22 do theory.md para guia conceitual.
+**Seção 8 (análise posicional) — específico:** use `c.position_facts_top` (top-15 padrões estruturais com `label`, `n`, `win_rate_when_present`). A tabela já é renderizada automaticamente pelo macro `position_facts_block`. Você escreve `section_positional` (1–2 parágrafos): (a) qual padrão estrutural domina (ex: "você frequentemente joga com IQP — em 18 partidas, win-rate de 61% quando presente"), (b) o que os padrões recorrentes revelam sobre seu estilo (fechado/aberto, reativo/proativo), (c) 1 recomendação de estudo vinculada ao padrão mais fraco (win_rate mais baixo). Se `position_facts_top` estiver vazio ou ausente (análise completa não rodou), pule a seção — ela não aparece no PDF.
+
+**Seção 10 (gestão de tempo) — específico:** use `c.time_analysis` (se `available=true`). Tabelas e KPIs já são renderizados pelo macro `time_analysis_block`; você escreve `section_time_management` (1–2 parágrafos) cobrindo: (a) padrão geral de uso de tempo (mediana por fase, onde gasta mais), (b) o que a pressão de relógio (`time_pressure.blunder_rate_ratio`) revela — degradação real vs. neutra, (c) leitura de "pensou e errou" (cálculo longo que falhou — viés de otimismo / cegueira tática) e "errou rápido" (premove ou impulso). Termine com 1 frase prática (ex: "regule o relógio na transição abertura→meio-jogo: 65% dos seus erros graves vêm de decisões em &lt;3s lá"). Se `available=false`, pule a seção (template já mostra mensagem apropriada). Veja §22 do theory.md para guia conceitual.
 
 **Seção 11 (plano) — específico:** 3–5 prescrições priorizadas por retorno/tempo. Categoria fixa "primeiro estudar finais clássicos se for o ponto fraco" (Lucena/Philidor/oposição), depois repertório, depois cobertura ECO/depth se baixo. Calibre pelo `confidence_pct`. Use `tactical_profile.trend_lines` para indicar progresso vs. persistência de fraqueza.
 
@@ -135,6 +138,7 @@ Salvar como `data/<username>_<timestamp>_myself_sections.json`:
   "section_1_intro": "...", "section_2_phases": "...", "section_3_colors": "...",
   "section_4_tactics": "...", "section_5_openings": "...", "section_6_endgames": "...",
   "paradigmatic_narratives": { "game_<N>": "..." },
+  "section_positional": "...",
   "section_time_management": "...",
   "section_9_strengths": "...", "section_10_opponents": "...", "section_11_plan": "..."
 }

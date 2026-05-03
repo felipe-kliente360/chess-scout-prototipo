@@ -1281,6 +1281,50 @@ def compute_clock_tactics_split(moves_df: pd.DataFrame) -> dict:
     }
 
 
+_FACT_PT: dict[str, str] = {
+    "isolated_pawn":          "Peão isolado",
+    "doubled_pawn":           "Peões dobrados",
+    "passed_pawn":            "Peão passado",
+    "backward_pawn":          "Peão atrasado",
+    "pawn_chain":             "Cadeia de peões",
+    "pawn_majority":          "Maioria de peões",
+    "iqp":                    "Peão isolado de dama (IQP)",
+    "hanging_pawns":          "Peões pendurados",
+    "open_file":              "Coluna aberta",
+    "semi_open_file":         "Coluna semi-aberta",
+    "seventh_rank":           "7ª fileira dominada",
+    "long_diagonal_open":     "Diagonal longa aberta",
+    "bad_bishop":             "Bispo ruim",
+    "good_bishop":            "Bispo bom",
+    "king_in_center":         "Rei no centro",
+    "pawn_shield_intact":     "Escudo de peões intacto",
+    "pawn_shield_absent":     "Sem escudo de peões",
+    "pawn_shield_broken":     "Escudo de peões quebrado",
+    "open_file_near_king":    "Coluna aberta perto do rei",
+    "bishop_pair":            "Par de bispos",
+    "opposite_color_bishops": "Bispos de cores opostas",
+    "piece_low_mobility":     "Peça com pouca mobilidade",
+    "piece_high_mobility":    "Peça com alta mobilidade",
+    "static_trapped_piece":   "Peça presa/encurralada",
+    "overloaded_piece":       "Peça sobrecarregada",
+    "exposed_king":           "Rei exposto",
+    "pin_prevents_attack":    "Cravada bloqueando ataque",
+    "opposite_side_castles":  "Roques opostos",
+    "castled":                "Roque realizado",
+    "center_type":            "Tipo de centro",
+    "position_phase":         "Fase da posição",
+}
+
+
+def _fact_label(key: str) -> str:
+    parts = key.split(":")
+    kind, color = parts[0], (parts[1] if len(parts) > 1 else None)
+    label = _FACT_PT.get(kind, kind.replace("_", " ").title())
+    if color:
+        label += f" ({'brancas' if color == 'w' else 'pretas'})"
+    return label
+
+
 def main():
     if len(sys.argv) < 2:
         raise SystemExit("Uso: python compute.py <username>")
@@ -1811,7 +1855,7 @@ def main():
                 facts_corr[key][result.lower()] += 1
 
     position_facts_top = [
-        {"key": k, "n": n,
+        {"key": k, "n": n, "label": _fact_label(k),
          "win_rate_when_present": (
              round(100 * facts_corr.get(k, {}).get("win", 0)
                    / max(1, sum(facts_corr.get(k, {}).values())), 1)

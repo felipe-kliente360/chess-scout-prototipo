@@ -15,7 +15,7 @@
 </style>
 </head>
 <body>
-{% from 'macros.html' import sample_warning, score_legend, phases_table, colors_table, time_class_table, openings_family_table, game_card, puzzle_program_block, head_to_head_table, references_list, evolution_block, time_analysis_block, cheat_signals_block %}
+{% from 'macros.html' import sample_warning, score_legend, phases_table, colors_table, time_class_table, openings_family_table, game_card, puzzle_program_block, head_to_head_table, references_list, evolution_block, time_analysis_block, cheat_signals_block, position_facts_block %}
 
 <div class="cover">
   <div class="icon">🎯</div>
@@ -99,8 +99,16 @@
   {% endfor %}
 </div>
 
+{% if c.position_facts_top and c.position_facts_top|length > 0 %}
 <div class="section">
-  <h2>8. Números do adversário</h2>
+  <h2>8. Análise posicional / temas estratégicos</h2>
+  {{ s.section_positional | nl2p | safe if s.section_positional else '' }}
+  {{ position_facts_block(c.position_facts_top) }}
+</div>
+{% endif %}
+
+<div class="section">
+  <h2>9. Números do adversário</h2>
   <div class="kpi-grid">
     <div class="kpi"><div class="v">{{ c.kpis.n_games }}</div><div class="l">Partidas</div></div>
     <div class="kpi"><div class="v">{{ c.kpis.win_rate }}%</div><div class="l">Win-rate</div></div>
@@ -120,36 +128,36 @@
 </div>
 
 <div class="section">
-  <h2>9. Gestão de tempo dele</h2>
+  <h2>10. Gestão de tempo dele</h2>
   {{ s.section_time_management | nl2p | safe }}
   {{ time_analysis_block(c.time_analysis, my_pronoun='ele') }}
 </div>
 
 <div class="section">
-  <h2>10. Plano de combate</h2>
+  <h2>11. Plano de combate</h2>
   {{ s.section_9_battleplan | nl2p | safe }}
 </div>
 
 <div class="section">
-  <h2>11. Armadilhas e padrões para induzir</h2>
+  <h2>12. Armadilhas e padrões para induzir</h2>
   {{ s.section_10_traps | nl2p | safe }}
 </div>
 
 <div class="section">
-  <h2>12. Programa de treino — você contra ele</h2>
+  <h2>13. Programa de treino — você contra ele</h2>
   {{ puzzle_program_block(c.puzzle_program, s.section_puzzle_program) }}
 </div>
 
 {% if c.cheat_signals and c.cheat_signals.available %}
 <div class="section">
-  <h2>13. Sinais de assistência computacional (do adversário)</h2>
+  <h2>14. Sinais de assistência computacional (do adversário)</h2>
   {{ s.section_cheat_signals | nl2p | safe if s.section_cheat_signals else '' }}
   {{ cheat_signals_block(c.cheat_signals) }}
 </div>
 {% endif %}
 
 <div class="section">
-  <h2>14. Partidas-chave (5 melhores vitórias dele + 5 piores derrotas dele)</h2>
+  <h2>15. Partidas-chave (5 melhores vitórias dele + 5 piores derrotas dele)</h2>
   {{ references_list(c.references) }}
 </div>
 

@@ -68,7 +68,7 @@ Saída JSON traz:
 
 Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cacheadas + regeneradas). Salvar como `data/<username>_<stamp>_enemy_sections.json`. Economia de tokens: ~10× menos quando muda pouco.
 
-### 3. Redigir as 10 seções
+### 3. Redigir as 11 seções
 
 | # | Título no PDF | Chave JSON |
 |---|---|---|
@@ -79,11 +79,12 @@ Em `partial_regen`, o sections.json final precisa ter **todas** as chaves (cache
 | 5 | Padrões por cor | `section_5_colors` |
 | 6 | Como ele perde — padrões de derrota | `section_6_losing_patterns` |
 | 7 | Partidas de referência | `paradigmatic_narratives.game_<N>` |
-| 8 | Números do adversário | (tabelas automáticas) |
-| 9 | Gestão de tempo dele | `section_time_management` |
-| 10 | Plano de combate | `section_9_battleplan` |
-| 11 | Armadilhas e padrões para induzir | `section_10_traps` |
-| 12 | Programa de treino — você contra ele | `section_puzzle_program` (opcional) |
+| 8 | Análise posicional / temas estratégicos | `section_positional` |
+| 9 | Números do adversário | (tabelas automáticas) |
+| 10 | Gestão de tempo dele | `section_time_management` |
+| 11 | Plano de combate | `section_9_battleplan` |
+| 12 | Armadilhas e padrões para induzir | `section_10_traps` |
+| 13 | Programa de treino — você contra ele | `section_puzzle_program` (opcional) |
 
 **Seção 3 (vulnerabilidades táticas) — use `tactical_profile` do adversário:**
 
@@ -99,7 +100,9 @@ Nomes de tema seguem taxonomia Lichess (`fork`, `pin`, `discoveredAttack`, `back
 
 **Seção 4 (repertório) — específico:** use `c.openings_by_family` para listar o que ele mais joga; `c.openings_weak_spots` para identificar famílias onde ele perde — essas são as armas a induzir. Citar `c.eco_stats.avg_eco_ply`: se baixo, ele improvisa cedo (atacar com linha forçada); se alto, conhece teoria (sair do livro com transposições laterais).
 
-**Seção 9 (gestão de tempo dele) — específico:** use `c.time_analysis`. Foque na exploração tática: (a) como ele administra o relógio (mediana por fase) — onde ele "afoga" ou "desliga"; (b) leitura de `time_pressure.blunder_rate_ratio`: razão >1.5 indica que ele desmonta sob pressão (acelere; force trocas/complicações no terço final); (c) padrão de "pensou e errou" (top `long_think_blunders`) — viés do otimismo dele em cálculo longo, atacar com posições onde refutação é concreta; (d) "errou rápido" (top `fast_blunders`) — premove ou reflexo, induzir lances forçados em sequência. Encerre com 1 instrução tática (ex: "complique no lance 25–35 — é onde a curva de erro dele dispara em pressão"). Se `available=false`, pule.
+**Seção 8 (análise posicional dele) — específico:** use `c.position_facts_top`. A tabela já é renderizada automaticamente. Você escreve `section_positional` (1–2 parágrafos): (a) qual padrão estrutural ele usa mais (ex: "ele joga frequentemente com o rei no centro — em 12 partidas, win-rate de 38% quando presente — explorar essa vulnerabilidade"), (b) o que os padrões revelam sobre o estilo dele (abertura favorita, tendência posicional), (c) 1 instrução de combate vinculada ao padrão mais fraco dele (win_rate mais baixo). Se `position_facts_top` estiver vazio, pule — seção não aparece no PDF.
+
+**Seção 10 (gestão de tempo dele) — específico:** use `c.time_analysis`. Foque na exploração tática: (a) como ele administra o relógio (mediana por fase) — onde ele "afoga" ou "desliga"; (b) leitura de `time_pressure.blunder_rate_ratio`: razão >1.5 indica que ele desmonta sob pressão (acelere; force trocas/complicações no terço final); (c) padrão de "pensou e errou" (top `long_think_blunders`) — viés do otimismo dele em cálculo longo, atacar com posições onde refutação é concreta; (d) "errou rápido" (top `fast_blunders`) — premove ou reflexo, induzir lances forçados em sequência. Encerre com 1 instrução tática (ex: "complique no lance 25–35 — é onde a curva de erro dele dispara em pressão"). Se `available=false`, pule.
 
 **Seção 10 (plano de combate) — específico:** 4–6 instruções táticas concretas, ex:
 1. "Com brancas, jogue X (1.d4 ou 1.c4) para forçá-lo na família Y onde ele tem 25% de win-rate."
@@ -118,6 +121,7 @@ Salvar como `data/<username>_<timestamp>_enemy_sections.json`:
   "section_1_profile": "...", "section_2_strengths": "...", "section_3_weaknesses": "...",
   "section_4_repertoire": "...", "section_5_colors": "...", "section_6_losing_patterns": "...",
   "paradigmatic_narratives": { "game_<N>": "..." },
+  "section_positional": "...",
   "section_time_management": "...",
   "section_9_battleplan": "...", "section_10_traps": "..."
 }
