@@ -1,409 +1,218 @@
-# chess-scout-prototipo
+# chess-scout
 
-Gerador de relatórios analíticos de xadrez (PDF, PT-BR) para jogadores de Chess.com. Coleta partidas, analisa cada lance com **Stockfish + tema tático + fatos estruturais** (3 camadas determinísticas e complementares), persiste tudo em SQLite local e produz três tipos de dossiê:
-
-- **`/report-myself <user>`** — perspectiva "este jogador sou eu". Diagnóstico próprio + plano de estudo de 30 dias.
-- **`/report-enemy <user>`** — perspectiva "este é meu adversário". Plano de combate concreto.
-- **`/report-coach <user>`** — perspectiva "este aluno é meu" (B2B treinador/escola). Delta vs ciclo anterior + comparativo cross-aluno + plano didático com livros e cronograma.
+Transforma suas partidas do Chess.com em um relatório de análise em PDF, em português, com diagnóstico real e plano de ação concreto.
 
 ---
 
-## Por que existe
+## O que é
 
-Análises padrão do Chess.com e Lichess respondem **"o que aconteceu nesta partida?"**. Este projeto responde:
+**chess-scout** analisa suas partidas recentes e responde três perguntas que plataformas como Chess.com e Lichess não respondem bem:
 
-- **"O que precisa estudar nos próximos 30 dias?"**
-- **"Como me preparar para enfrentar este adversário específico?"**
-- **"Em que padrões estruturais o jogador vence — e em quais ele cai?"**
+- **O que devo estudar nos próximos 30 dias para melhorar de verdade?**
+- **Como me preparar para enfrentar este adversário específico?**
+- **Em quais situações eu vejo o tabuleiro melhor — e em quais eu falho?**
 
-Três perguntas que ferramentas comerciais não atendem com profundidade.
-
-## Diferenciais
-
-| Item | Chess.com / Lichess | Este projeto |
-|---|---|---|
-| **Score** | Accuracy 0–100% absoluta | **Score 0–10 canônico** (subset competitivo, ±10% Elo) com blend de 50% ACPL + 30% win-rate + 20% redução de blunders, calibrado por curva chess.com empírica e penalizado quando ACPL é implausível para o rating (sinal de motor). Faixa de incerteza ±0.2 a ±1.5 dependendo do depth. |
-| **Análise por posição** | Só Stockfish | **3 camadas independentes**: Stockfish + tema tático (308k puzzles do woodpecker) + 24 fatos estruturais determinísticos |
-| **Filtragem** | Inclui tudo | Filtro de relevância (descarta curtas, abandonos, early timeout/resign) — universo analítico vs. histórico real separados |
-| **Aberturas** | Identifica ECO | Mapeia repertório completo + identifica weak spots + recomenda trocas concretas |
-| **Lances paradigmáticos** | Mostra blunders | **Vitória**: 2 melhores + 1 pior do jogador. **Derrota**: 2 piores do jogador + 1 melhor do adversário. Spread temporal mínimo (8 plies), ordem cronológica. |
-| **Plano de ação** | Genérico | Prescrições priorizadas por retorno/esforço + programa de puzzles |
-| **Persistência** | Histórico no site | **SQLite local** com `players` + `analyses` + `games` + `game_analyses` + `position_cache` + `position_facts` cacheados |
-| **Pipeline** | Web only | **Servidor Python local** (stdlib) elimina CSV manual; dedup automático por `(game_id, ply, depth)` — re-análises instantâneas |
-| **Lifecycle** | Browser sempre aberto | Slash commands `/app-start` e `/app-stop` orquestram processos em background |
-| **Output** | PDF baixado | **`data-reports/<user>_<perspective>_<stamp>.pdf`**, sem JSON de apoio (preservado em `analyses` table) |
-| **Linguagem** | Inglês técnico | **PT-BR direto** (proibidas referências a "Stockfish", "ACPL", "centipeão" no texto final) |
+O resultado é um PDF em português, direto, sem jargão técnico, com números reais das suas partidas e um plano de estudo baseado neles.
 
 ---
 
-## Como tudo funciona — visão de alto nível
+## Dois tipos de relatório
 
-### 1. Liga o app
+### 📘 Relatório "Eu" — diagnóstico próprio
 
-```bash
-bash scripts/start.sh         # ou via Claude Code: /app-start
-```
+Para quando você quer melhorar seu próprio jogo. O relatório responde:
 
-Sobe servidor stdlib (`scripts/serve.py`) em `http://127.0.0.1:8000/` em background, valida `/api/health`, registra PID em `.app-state.json` e tenta abrir o navegador. Sem dependências além do Python (Flask **não** é necessário). Idempotente — chamar de novo é no-op.
+- Em qual fase (abertura, meio-jogo, finais) você perde mais pontos?
+- Quais padrões táticos você não enxerga quando estão disponíveis?
+- Quais aberturas te servem — e quais você deveria trocar?
+- Como você usa o relógio e quando ele te prejudica?
+- O que estudar primeiro com base no maior retorno por hora investida?
 
-### 2. Configura na UI
+### 🎯 Relatório "Adversário" — dossiê de combate
 
-Abrir **http://127.0.0.1:8000/** (badge verde fixo `SERVER MODE · history.db` confirma o modo). Define:
+Para quando você vai enfrentar alguém específico e quer se preparar. O relatório responde:
 
-- **Username** chess.com
-- **Quantidade** partidas/formato — cap automático: `qtd × n_formatos ≤ 400`
-- **Depth Stockfish** — default **15** (recomendado); hint dinâmico exibe ±incerteza por depth (±1.5 em d10, ±0.5 em d15, ±0.2 em d18+)
-- **Engine** — Stockfish local WASM (Hash 256MB) ou API remota stockfish.online
-- **Formatos** — bullet/blitz/rapid/daily
-
-### 3. Coleta — botão "Buscar Partidas"
-
-```
-Browser → api.chess.com → ECO classifier → POST /api/games → SQLite
-```
-
-- Lista archives chess.com do user
-- Itera meses do mais recente ao antigo, filtra por formato + n_plies ≥ 15
-- Quotas independentes por formato (50 blitz **+** 50 rapid, não misturado)
-- Classifica abertura via base ECO Lichess (3.690 posições, varredura até 25 plies)
-- **Persiste** cada partida em `games` (UPSERT idempotente por URL chess.com — re-coletar nunca duplica)
-
-### 4. Análise — botão "⚙ Analisar Stockfish"
-
-**Pré-flight**:
-- Estima tempo total; se >30 min pede confirmação modal
-- Carrega `eco.json`, `position_cache.json`, `themes_index.json` (todos lazy)
-- `GET /api/analyses?username=X&game_ids=...` traz só análises das partidas da sessão (payload proporcional)
-- Inicializa engine WASM com `setoption name Hash value 256` (tabela de transposição expandida)
-
-**Loop por lance** — duas camadas em paralelo no browser:
-
-1. **Stockfish** — `evaluation`, `mate`, `best_move`, `continuation`. Dedup hierárquico: se já tem em `game_analyses` com depth ≥ alvo, **reusa direto**; senão consulta `position_cache.json`; senão chama o engine.
-2. **Tema tático** — `TacticalThemes.classifyPosition(fen, best, played)` consulta `themes_index.json` (4 MB, 32k fingerprints B + 2.5k C, do release [woodpecker-puzzles](https://github.com/felipe-kliente360/woodpecker-puzzles)). Retorna `{theme, confidence, source}`.
-
-**Persistência ao terminar cada partida** (não a cada N lances): `POST /api/analyses` em batch. UPSERT segue regra "maior depth vence" — d15 sobrescreve d10, d8 não sobrescreve d15.
-
-### 5. Compute do relatório
-
-```bash
-python3.12 .claude/skills/_chess_shared/compute.py <username>
-```
-
-Lê `games + game_analyses` direto do SQLite. **Terceira camada (fatos estruturais)** roda aqui em todo lance com `loss_cp ≥ 50` via `position_facts.py` (24 detectores determinísticos), com cache delta no DB pra próximas execuções. Produz `data/<user>_<stamp>_computed.json` com:
-
-- **Score canônico (`kpis.score_10`)** + variantes auxiliares + `score_10_basis` indicando a base
-- **Banda de incerteza** por depth — relator deve usar como faixa, não ponto
-- **Por fase / cor / time_class / família ECO**
-- **Aberturas weak spots** (n≥5 e win-rate <40%)
-- **Tactical themes top** + correlação por resultado
-- **Position facts top** + correlação
-- **4 partidas paradigmáticas** (2 melhores vitórias + 2 piores derrotas) com 3 `key_positions` cada — cada uma carregando as 3 camadas juntas
-
-### 6. Skill — PDF
-
-```
-/report-myself <user>     # ou /report-enemy <user>
-```
-
-A skill lê o computed JSON + `theory.md` (referência teórica), redige seções em PT-BR direto citando motivos pelo nome canônico (garfo, IQP, escudo quebrado) ancorados em autores (Capablanca, Nimzowitsch, Soltis, Vukovic, Dvoretsky). `build.py` renderiza HTML + WeasyPrint → PDF em **`data-reports/<user>_<perspective>_<stamp>.pdf`**, e **deleta** computed.json + sections.json (preservados no SQLite via `analyses.computed_json`).
-
-### 7. Desliga o app
-
-```bash
-bash scripts/stop.sh          # ou /app-stop
-```
-
-Lê `.app-state.json`, SIGTERM gracioso (1s), SIGKILL nos sobreviventes, limpa estado. Idempotente.
-
-### 8. Re-análises são instantâneas
-
-- Coletar partidas: `games` faz UPSERT idempotente — re-coletar não duplica.
-- Re-analisar com mesma depth: dedup pula 100% do Stockfish.
-- Subir depth (15 → 18): só re-roda nas plies onde a depth nova > existente.
-- Position facts: cacheados no DB após primeira execução de `compute.py`.
-- Tactical themes: classificação pura no browser, instantânea.
-- Re-gerar relatório: `compute.py + build.py` em ~5s pra um usuário com cache completo.
+- O que ele joga mais — e o que induzi-lo a jogar onde ele perde?
+- Onde ele é sólido (evitar) e onde ele desmorona (atacar)?
+- Em quais padrões táticos ele cai com mais frequência?
+- Como ele usa o tempo e quando ele colapsa sob pressão?
+- Quais armadilhas e sequências você pode preparar contra ele?
 
 ---
 
-## Arquitetura
+## Três níveis de análise
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Browser (http://127.0.0.1:8000/)                            │
-│  • chess.js + stockfish.js (WASM Hash 256MB)                 │
-│  • tactical-themes.js (consulta themes_index.json)           │
-│  • Carrega ECO + position_cache lazy                         │
-└────────────────┬─────────────────────────────────────────────┘
-                 │  REST API (/api/games, /api/analyses, ...)
-                 ▼
-┌──────────────────────────────────────────────────────────────┐
-│  scripts/serve.py (stdlib http.server)                       │
-│  • UPSERT idempotente em games + game_analyses               │
-│  • Filtra por game_ids para payload enxuto                   │
-│  • Endpoints: health, players, summary, games(/existing),    │
-│    analyses(/needed)                                         │
-└────────────────┬─────────────────────────────────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────────────────────────────────┐
-│  data/db/history.db (SQLite, fonte única)                       │
-│  ├── players (usuários conhecidos)                           │
-│  ├── games (UPSERT por URL chess.com)                        │
-│  ├── game_analyses (PK game_id+ply, +position_facts cache)   │
-│  ├── analyses (snapshot do compute por (user, stamp))        │
-│  └── position_cache (cache compartilhado por FEN)            │
-└────────────────┬─────────────────────────────────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────────────────────────────────┐
-│  compute.py <user>                                           │
-│  • Score blend canônico (50% ACPL + 30% wr + 20% blunder)    │
-│    × engine_factor (penalidade motor) × variante eleita      │
-│    por hierarquia (competitive ≥15 → modality_avg → overall) │
-│  • Position_facts in-flight com cache delta no DB            │
-│  • Aggregados táticos + estruturais com win-rate             │
-│  • Paradigmáticas: 2 melhores + 1 pior (vitória),            │
-│                    2 piores + 1 advers. (derrota)            │
-└────────────────┬─────────────────────────────────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Skill (Claude Code)                                         │
-│  • Redige sections.json em PT-BR (theory.md guia tom)        │
-│  • build.py: Jinja2 + python-chess SVG + WeasyPrint          │
-└────────────────┬─────────────────────────────────────────────┘
-                 │
-                 ▼
-       data-reports/<user>_<perspective>_<stamp>.pdf
-       (computed.json + sections.json deletados após render)
-```
+A profundidade do relatório depende do modo que você escolher no app:
+
+| | Flash | Rápida | Completa |
+|---|---|---|---|
+| Partidas coletadas | 200 | 30 | 100 |
+| Análise de lances | Não | Seus lances | Todos os lances |
+| Erros táticos detectados | Não | Seus (tipo A) | Todos (A + B + C) |
+| Padrões posicionais | Não | Parcial | Completo |
+| Gestão de tempo | Sim | Sim | Sim |
+| Aberturas | Sim | Sim | Sim |
+| Tempo aproximado | ~1 min | ~5 min | ~30 min |
+
+**Flash** — Visão rápida de repertório e volume. Sem análise individual de lances. Útil para primeira impressão ou quando o tempo é curto.
+
+**Rápida** — Analisa seus lances principais. Detecta os padrões táticos que você deixou passar. Bom para diagnóstico direcional sem esperar meia hora.
+
+**Completa** — Analisa todos os lances dos dois lados. Detecta também quando seus erros criaram oportunidades para o adversário e quando ele te perdoou. Base para o relatório mais completo.
 
 ---
 
-## Estrutura do projeto
+## O que o app analisa em cada lance
 
-```
-chess-scout-prototipo/
-├── index.html                            # UI: coletor + analisador (browser)
-├── tactical-themes.js                    # Classificador tático (browser)
-├── README.md
-├── ROADMAP.md
-│
-├── data/                                 # Bases canônicas + DB local
-│   ├── db/                               # SQLite — fonte única (PII, gitignored)
-│   │   └── history.db (+ -wal/-shm)
-│   ├── openings/
-│   │   ├── eco.json                      # Base ECO Lichess (3.690 posições, versionado)
-│   │   ├── *.tsv                         # TSVs raw Lichess (versionado)
-│   │   └── position_cache.json           # Cache do browser (gitignored)
-│   └── tactical/
-│       └── themes_index.json             # Índice tático 4 MB (versionado)
-│
-├── data-reports/                         # PDFs finais (gitignored, PII)
-│   └── <user>_<perspective>_<stamp>.pdf
-│
-├── scripts/
-│   ├── start.sh                          # /app-start (idempotente, registra PIDs)
-│   ├── stop.sh                           # /app-stop (SIGTERM → SIGKILL → limpa estado)
-│   ├── serve.py                          # Servidor local (stdlib)
-│   ├── build_eco_index.py                # Constrói eco.json (rebuild raro)
-│   └── build_tactical_index.py           # Constrói themes_index.json
-│
-├── tests/
-│   ├── conftest.py
-│   ├── test_helpers.py                   # Score, depth_factor, classify_loss…
-│   └── test_history.py                   # SQLite + cache de posições
-│
-└── .claude/
-    ├── settings.json
-    ├── commands/                         # Slash commands
-    │   ├── app-start.md
-    │   ├── app-stop.md
-    │   ├── report-myself.md
-    │   ├── report-enemy.md
-    │   └── report-coach.md
-    └── skills/
-        ├── _chess_shared/
-        │   ├── compute.py                # Pipeline analítico
-        │   ├── build.py                  # Renderização PDF
-        │   ├── history.py                # SQLite schema + helpers
-        │   ├── cache_lookup.py           # Cache de sections (regen rápida)
-        │   ├── clock.py                  # Extração [%clk] do PGN
-        │   ├── position_facts.py         # 24 detectores estruturais
-        │   ├── theory.md                 # Referência conceitual + tom
-        │   ├── base.css
-        │   └── macros.html
-        ├── report-myself/
-        │   ├── SKILL.md
-        │   └── template.html
-        ├── report-coach/
-        │   ├── SKILL.md
-        │   └── template.html
-        └── report-enemy/
-            ├── SKILL.md
-            └── template.html
-```
+Para cada lance relevante, três perguntas independentes:
+
+**1. Qualidade do lance**
+Qual era o melhor lance possível? Quanto você perdeu ao jogar diferente? A diferença acumulada ao longo da partida compõe seu score 0–10.
+
+**2. Havia uma tática disponível?**
+Garfo, cravada, espeto, mate, sacrifício... O app cruza a posição com uma base de 308 mil puzzles para detectar se havia um motivo tático disponível e se você o jogou ou não.
+
+**3. Como estava o tabuleiro estruturalmente?**
+Rei exposto? Peão isolado? Escudo quebrado? Coluna aberta perto do rei? 24 detectores automáticos mapeiam o contexto posicional de cada erro — o que ajuda a entender *por que* você errou, não só *onde*.
 
 ---
 
-## Conceitos centrais
+## Os três tipos de erro tático
 
-### Score 0–10 — modelo final
+Quando há uma tática disponível numa posição:
 
-```
-score_10 = 10 × engine_factor × (
-  0.5 × ACPL_score      # exp(-(acpl_d20_eq / expected_acpl(rating)) / 2)
-+ 0.3 × win_score       # win_rate / 100
-+ 0.2 × blunder_score   # 1 / (1 + bpm/5), bpm = blunders por 100 lances
-)
-```
+- **Tipo A** — Você tinha a tática no seu lance mas não jogou. O erro é seu — cegueira tática.
+- **Tipo B** — Seu lance criou uma tática para o adversário, e ele aproveitou. O erro é posicional.
+- **Tipo C** — Seu lance criou uma tática para o adversário, mas ele não viu. Você teve sorte.
 
-- **`expected_acpl(rating)`**: curva chess.com empírica (não a teórica antiga). Âncoras: 1000:120, 1400:80, 1800:50, 2200:30, 2500:20.
-- **`engine_factor`**: penalidade quando `ACPL_d20 / expected < 0.5` (sinal de motor). Linear de 1.0 (ratio ≥0.5) até piso 0.5 (ratio = 0). Só aplica em amostra ≥100 lances.
-
-**Variantes calculadas** (todas com mesmo blend, em subsets diferentes):
-- `score_10_overall` — todas as partidas relevantes
-- `score_10_competitive` — só adversários em `±max(150, 10% rating)` Elo
-- `score_10_weighted` — peso `exp(-(gap/300)²)` por gap
-- `score_10_by_modality_avg` — média aritmética dos competitivos por time_class
-
-**`kpis.score_10` canônico (Opção B)** — hierarquia:
-1. `competitive` se `n_competitive_games ≥ 15` ← preferido
-2. `modality_avg` se ≥2 modalidades com ≥10 partidas
-3. `overall` como fallback
-
-`kpis.score_10_basis` documenta a base eleita.
-
-### Faixa de incerteza por depth
-
-| Depth | Banda | Leitura |
-|---|---|---|
-| ≤10 | ±1.5 | Preview — só erros grosseiros |
-| 12 | ±1.0 | Rápido, magnitude duvidosa |
-| **15** | **±0.5** | **Padrão recomendado** |
-| 18+ | ±0.2 | Análise séria |
-
-### As 3 camadas de análise por posição
-
-1. **Stockfish**: avaliação numérica, melhor lance, mate.
-2. **Tactical theme** (`tactical_theme`, `tactical_confidence`, `tactical_source`): classificação automática via fingerprint de delta best-vs-played (C) ou padrão posicional (B). Fonte: 308k puzzles Lichess via woodpecker. Temas: garfo, cravada, espeto, mate sufocado, sacrifício grego, etc.
-3. **Position facts** (`position_facts`): 24 detectores em `position_facts.py` — peão isolado/passado/atrasado/dobrado, cadeia de peões, IQP, escudo de peões intacto/quebrado, par de bispos, par de bispos opostos, mobilidade extrema, peça presa, abertura/fechamento de centro. Cada fato traz casa específica e métricas auxiliares.
-
-### Filtro de relevância
-
-Excluído do universo analítico (mas mantido em win-rate histórico):
-- `n_user_moves < 25` (early timeout/resign)
-- `termination ∈ {abandoned}`
-- `termination ∈ {timeout, resigned} AND plies < 30`
-
-### Confiabilidade da amostra (`confidence_pct`)
-
-`50%` × tamanho da amostra (satura em 50 partidas) + `30%` × profundidade do motor (satura em d18) + `20%` × cobertura ECO.
-
-### Lances paradigmáticos (Seção 7 do PDF)
-
-Por partida paradigmática (4 totais por relatório):
-- **Vitória**: 2 lances do jogador com maior swing positivo + 1 lance do jogador com maior loss
-- **Derrota**: 2 lances do jogador com maior loss + 1 lance do adversário com maior swing a favor dele
-- Spread mínimo de 8 plies entre os 2 destacados
-- Ordem cronológica sempre
-- Cada um traz as 3 camadas (stockfish + tactical + facts)
+O modo **Rápida** detecta só tipo A (seus erros diretos). O modo **Completo** detecta A, B e C.
 
 ---
 
-## Pré-requisitos
+## O que está em cada seção do relatório
+
+Todos os relatórios abrem com um **painel de dados** — todas as tabelas, gráficos e métricas juntos — para você ter o contexto completo antes de ler a análise narrativa.
+
+Depois, o relatório segue o fluxo natural de uma partida:
+
+| Seção | O que você vai ler |
+|---|---|
+| **Situação geral** | Onde você está hoje em score, win-rate e confiabilidade da amostra |
+| **Abertura e desenvolvimento** | O que você joga, com que profundidade de teoria, onde improvisa cedo |
+| **Meio-jogo — táticas e estratégia** | Padrões táticos que você erra + estruturas posicionais que dominam seus erros, integrados |
+| **Como conduz finais** | Onde você ganha ou perde pontos na fase final |
+| **Padrões por cor** | Você é diferente com brancas vs pretas? Por quê? |
+| **Gestão de tempo** | Quando o relógio te prejudica e em quais situações você decide rápido demais |
+| **Partidas relevantes** | 4 partidas reais que provam o diagnóstico — 2 vitórias + 2 derrotas |
+| **Pontos fortes e fracos** | Síntese do diagnóstico completo |
+| **Como adversários te vencem** | A perspectiva de quem está do outro lado |
+| **Plano de estudo** | 3–5 coisas para estudar nos próximos 30 dias, por retorno |
+
+No relatório do adversário, as seções de análise descrevem o jogo *dele*, e o bloco final vira plano de combate: o que evitar, como atacar, armadilhas a induzir.
+
+---
+
+## Score 0–10
+
+Em vez de "Accuracy 94%" — um número que não diz o que fazer — o chess-scout calcula um score composto:
+
+- **50%** precisão dos lances, calibrada pelo seu rating (um 1200 que joga como 1200 tira 5.0, não 2.0)
+- **30%** resultado das partidas (win-rate)
+- **20%** frequência de erros graves
+
+O score é calculado só nas partidas competitivas (adversários próximos do seu rating), o que elimina o viés de partidas fáceis ou difíceis demais.
+
+---
+
+## Como usar
+
+### Pré-requisitos
 
 ```bash
 brew install python@3.12 pango
-python3.12 -m pip install --break-system-packages pandas jinja2 chess weasyprint pytest
+python3.12 -m pip install --break-system-packages pandas jinja2 chess weasyprint
 ```
 
-(WeasyPrint precisa de Pango via brew. Pandas, jinja2, chess e weasyprint via pip. pytest é opcional.)
+### Primeira vez — clone e pronto
 
-## Setup inicial
-
-**Não precisa rodar nenhum build.** As bases canônicas (`data/openings/eco.json` com 3.690 aberturas + `data/tactical/themes_index.json` com 308k puzzles processados) já vêm versionadas no repositório. Fresh-clone já é funcional.
-
-O que é local apenas (gitignored):
-- `data/db/history.db` — partidas + análises do user (criado na 1ª execução)
-- `data-reports/` — relatórios PDF gerados
-- `.app-state.json` + `.app-logs/` — lifecycle do app
-
-### (Opcional) Rebuilds manuais
-
-Só faça se quiser regenerar uma base do zero — em uso normal nunca é necessário:
+Não precisa rodar nenhum build. As bases de aberturas e táticas já vêm no repositório.
 
 ```bash
-# Reconstruir índice ECO a partir dos TSVs Lichess em data/openings/
-python3.12 scripts/build_eco_index.py
-
-# Reconstruir o índice tático (precisa baixar o release woodpecker primeiro)
-python3.12 scripts/build_tactical_index.py \
-  --source /tmp/woodpecker-data \
-  --out data/tactical/themes_index.json \
-  --min-count 3
+git clone <repo>
+cd chess-scout-prototipo
 ```
 
-## Fluxo canônico
+### Fluxo de uso
 
 ```bash
 # 1. Liga o app
-bash scripts/start.sh         # ou /app-start
+bash scripts/start.sh
 
-# 2. UI: configurar → Buscar Partidas → ⚙ Analisar Stockfish
+# 2. Abre http://127.0.0.1:8000/ no navegador
+#    → digita o username do Chess.com
+#    → escolhe o modo (Flash / Rápida / Completa)
+#    → clica "Buscar Partidas" → "Analisar"
 
-# 3. Gerar PDF (via Claude Code)
-/report-myself <username>
-/report-enemy <username>
+# 3. Gera o PDF (via Claude Code)
+/report-myself <username>    # relatório de diagnóstico próprio
+/report-enemy <username>     # dossiê de combate
 
-# 4. Desligar
-bash scripts/stop.sh          # ou /app-stop
+# 4. Desliga
+bash scripts/stop.sh
 ```
 
-PDFs ficam em `data-reports/<user>_<perspective>_<stamp>.pdf`.
+O PDF fica em `data-reports/<username>_<perspectiva>_<data>.pdf`.
 
----
-
-## Skills (slash commands)
+### Comandos disponíveis
 
 | Comando | Função |
 |---|---|
-| `/app-start` | Liga o servidor local em background, registra PIDs, abre browser |
-| `/app-stop` | Derruba todos os processos registrados |
-| `/report-myself <user>` | PDF de diagnóstico próprio + plano de estudo (11 seções) |
-| `/report-enemy <user>` | PDF de dossiê de combate (10 seções) |
-| `/report-coach <user>` | PDF didático treinador→aluno: delta + benchmark cross-aluno + plano de 4 semanas (12 seções) |
+| `/app-start` | Liga o servidor local |
+| `/app-stop` | Desliga |
+| `/report-myself <user>` | PDF de diagnóstico próprio + plano de estudo |
+| `/report-enemy <user>` | PDF de dossiê de combate |
+| `/report-coach <user>` | PDF didático para treinadores (delta + benchmark + plano de 4 semanas) |
+| `/assess-data` | Resumo do que está no banco de dados |
 
 ---
 
-## Testes
+## Dados — o que fica salvo e onde
 
-```bash
-python3.12 -m pytest tests/ -v
+Tudo fica em `data/db/history.db` — um arquivo SQLite local, só na sua máquina, nunca sobe para o repositório.
+
+- **Partidas**: deduplicadas por URL. Recoleta nunca duplica.
+- **Análises**: organizadas por partida + lance + profundidade. Re-analisar com mesma profundidade é instantâneo (reusa o que já está salvo).
+- **Snapshots**: cada relatório gerado salva um snapshot completo dos dados — você pode re-gerar o PDF em ~5s sem refazer a análise.
+
+O que é gitignored (dados locais, não sobem):
+- `data/db/history.db` — partidas e análises
+- `data-reports/` — PDFs gerados
+- `.app-state.json` e `.app-logs/` — estado do servidor
+
+---
+
+## Arquitetura (para quem quiser entender o pipeline)
+
+```
+Browser (http://127.0.0.1:8000/)
+  Coleta partidas via chess.com API
+  Analisa cada lance: Stockfish WASM + tema tático + fatos estruturais
+  POST → serve.py (servidor Python local, stdlib)
+         ↓
+  data/db/history.db (SQLite)
+         ↓
+  compute.py → score, agregados, paradigmáticas, position_facts
+         ↓
+  Claude (skill) → redige seções em PT-BR
+         ↓
+  build.py (Jinja2 + WeasyPrint) → PDF
 ```
 
-Cobertura: helpers de score (calibração, faixas, monotonicidade), classificação de erros, SQLite history (insert, idempotência, ordem cronológica), cache de posições.
-
----
-
-## Persistência longitudinal
-
-Cada execução de `compute.py` grava snapshot completo em `analyses(username, stamp, computed_json)`. Permite:
-- `delta_vs_previous` automático (variação de Score, ACPL, win-rate entre ciclos)
-- Comparação cross-jogador (queries SQL diretas no `data/db/history.db`)
-- Reprocessar com template novo sem refazer Stockfish (tudo está em `analyses.computed_json`)
-
----
-
-## Stack técnica
-
-- **Frontend**: HTML/JS vanilla, `chess.js@0.10.3`, `stockfish.js@10.0.2` (WASM)
-- **Backend (CLI)**: Python 3.12, `pandas`, `python-chess`, `jinja2`, `weasyprint`
-- **Servidor local**: stdlib `http.server` (sem deps externas)
-- **Persistência**: SQLite (zero-config, single-file)
-- **Bases externas**: Chess.com API (CC0), Lichess ECO (CC0), Lichess puzzles via woodpecker (CC0)
-- **Renderização**: WeasyPrint (HTML+CSS → PDF), `chess.svg` (tabuleiros)
+**Stack**:
+- Frontend: HTML/JS vanilla, `chess.js`, `stockfish.js` (WASM)
+- Backend: Python 3.12, `pandas`, `python-chess`, `jinja2`, `weasyprint`
+- Servidor: stdlib `http.server` (sem Flask, sem dependências extras)
+- Persistência: SQLite local
 
 ---
 
